@@ -1,0 +1,82 @@
+[build-system]
+requires = ['setuptools', 'setuptools_scm']
+build-backend = 'setuptools.build_meta'
+
+[tool.setuptools_scm]
+
+[project]
+name = 'pydantic-modelable'
+description = 'A set of pydantic utilities, to extend models on package load'
+authors = [
+    {name = 'David Pineau', email = 'dav.pineau@gmail.com'},
+]
+license = 'BSD-3-Clause'
+license-files = ['LICENSE']
+readme = 'README.md'
+classifiers = [
+    'Development Status :: 3 - Alpha',
+    'Programming Language :: Python',
+    'Programming Language :: Python :: Implementation :: CPython',
+    'Programming Language :: Python :: Implementation :: PyPy',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
+    'Programming Language :: Python :: 3.14',
+    'Intended Audience :: Developers',
+    'Intended Audience :: Information Technology',
+    'Operating System :: OS Independent',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Framework :: pydantic',
+    'Typing :: Typed',
+]
+requires-python = '>=3.10'
+dependencies = [
+    "pydantic>=2.11",
+    "aenum>=3.1.13",
+]
+dynamic = ['version']
+
+[project.optional-dependencies]
+test = [
+    "mypy==1.18.2",
+    "ruff==0.13.2",
+    "pytest",
+]
+
+[project.urls]
+Homepage = 'https://github.com/Joacchim/pydantic-modelable'
+Source = 'https://github.com/Joacchim/pydantic-modelable'
+
+[tool.ruff]
+line-length = 120
+target-version = 'py310'
+
+[tool.ruff.lint]
+select = [
+    'F',      # Pyflakes
+    'E',      # pycodestyle (Error)
+    'I',      # isort
+    'D',      # pydocstyle
+    'UP',     # pyupgrade
+    'YTT',    # flake8-2020
+    'B',      # flake8-bugbear
+    'T10',    # flake8-debugger
+    'T20',    # flake8-print
+    'C4',     # flake8-comprehensions
+    'PERF',   # Perflint
+    'PIE',    # flake8-pie
+    'PYI006', # flake8-pyi
+    'PYI062', # flake8-pyi
+    'PYI063', # flake8-pyi
+    'PYI066', # flake8-pyi
+]
+ignore = ['D203', 'D211', 'D213']
+flake8-quotes = {inline-quotes = 'single'}
+isort = { known-first-party = ['pydantic_modelable', 'tests'] }
+mccabe = { max-complexity = 14 }
+
+[tool.ruff.format]
+quote-style = 'single'
