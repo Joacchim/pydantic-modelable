@@ -1,0 +1,11 @@
+[build-system]
+requires = ['setuptools', 'setuptools_scm']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'ext1'
+dynamic = ['version']
+description = 'An example of an extensible core, made using pydantic_modelable'
+dependencies = [
+    "core",
+]
