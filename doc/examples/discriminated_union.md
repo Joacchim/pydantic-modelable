@@ -58,6 +58,9 @@ class Shelter(BaseModel):
     rooms: list[ShelterRoom|None]
 ```
 
+| :memo: | You can specify the default-value behavior for discriminated unions using the `discriminator_default_policy` subclass constructor parameter. See the API Documentation for more details.  |
+|--------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+
 | :memo::exclamation: | Currently, only aenum-based str Enums are supported for the `extends_enum` decorator |
 |---------------------|:-------------------------------------------------------------------------------------|
 
