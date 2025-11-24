@@ -1,9 +1,10 @@
 """pydantic_modelable Module."""
 
 from .mixins import ModelableEnumMixin
-from .model import Modelable
+from .model import DefaultDiscriminatorPolicy, Modelable
 
 __all__ = [
+    'DefaultDiscriminatorPolicy',
     'Modelable',
     'ModelableEnumMixin',
 ]

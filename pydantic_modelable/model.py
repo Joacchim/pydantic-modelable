@@ -1,7 +1,8 @@
 """Base models for pydantic_modelable."""
 
+import enum
 from collections.abc import Callable, Sequence
-from typing import Annotated, Any, ClassVar, TypeVar, Union
+from typing import Annotated, Any, ClassVar, TypeVar, Union, cast
 
 import aenum
 from pydantic import BaseModel, Field, Tag
@@ -12,15 +13,58 @@ from .mixins import ModelableEnumMixin
 T = TypeVar('T', bound='type[aenum.Enum]|tuple[str,type[BaseModel]]')
 
 
+class DefaultDiscriminatorPolicy(enum.Enum):
+    """Describes the method used to determine a Discriminator's default value.
+
+    NONE: No default will be setup in the discriminated union
+    FIRST_REGISTERED: The first Modelable extension registered will be used as
+    the default
+    LAST_REGISTERED: The last Modelable extension registered will be used as
+    the default
+    PREDETERMINED: The base Modelable type provides a hard-coded default
+    value on initialization.
+
+    Usage examples:
+    ```py
+    # To use the first extension to MyExtensible ever loaded, provide the enum value:
+    class MyExtensible(
+        Modelable,
+        discriminator='attr',
+        discriminator_default_policy=DefaultDiscriminatorPolicy.FIRST_REGISTERED,
+    ):
+        ...
+
+    # To use the last extension to MyExtensible loaded before instanciation, provide the enum value:
+    class MyExtensible(
+        Modelable,
+        discriminator='attr',
+        discriminator_default_policy=DefaultDiscriminatorPolicy.LAST_REGISTERED,
+    ):
+        ...
+
+    # To use a pre-determined value, as a hard-coded default, provide a string:
+    class MyExtensible(Modelable, discriminator='attr', discriminator_default_policy='default'):
+        ...
+    ```
+    """
+
+    NONE = 0
+    FIRST_REGISTERED = 1
+    LAST_REGISTERED = 2
+    PREDETERMINED = 3
+
+
+_DefaultDiscriminatorConfig = tuple[DefaultDiscriminatorPolicy,str|None]
+
 class Modelable(BaseModel):
-    """Inherity from this class to define extensible pydantic_modelable models.
+    """Inherit from this class to define extensible pydantic_modelable models.
 
     Comes with all utilities to register other models as related models to be
     updated with each loaded extensions of the class derivating this one.
     """
 
     # set of types directly derivating Model
-    __discriminator__: ClassVar[dict[type[BaseModel], str | None]] = {}
+    __discriminator__: ClassVar[dict[type['Modelable'], tuple[str,_DefaultDiscriminatorConfig] | None]] = {}
     __subtypes__: ClassVar[dict[type['Modelable'], list[type['Modelable']]]] = {}
 
     # maps subtypes to the types registered as "Users" of the derivated Model
@@ -32,7 +76,12 @@ class Modelable(BaseModel):
         return cls.mro()[1]
 
     @classmethod
-    def __init_subclass__(cls, discriminator: str | None = None, **kwargs: Any) -> None:
+    def __init_subclass__(
+        cls,
+        discriminator: str | None = None,
+        discriminator_default_policy: str | DefaultDiscriminatorPolicy = DefaultDiscriminatorPolicy.NONE,
+        **kwargs: Any,
+    ) -> None:
         """Initialize the pydantic_modelable.Modelable internal class data for subclasses.
 
         It currently mostly records the subclass parameters into itself,
@@ -43,7 +92,12 @@ class Modelable(BaseModel):
         base = cls.mro()[1]
         # Here, we only record the discriminator and the subtype for the sake of it.
         if base not in cls.__subtypes__.keys():
-            cls.__discriminator__[cls] = discriminator
+            policy = discriminator_default_policy
+            policy_param: str | None = None
+            if isinstance(policy, str):
+                policy_param = policy
+                policy = DefaultDiscriminatorPolicy.PREDETERMINED
+            cls.__discriminator__[cls] = None if discriminator is None else (discriminator, (policy, policy_param))
             cls.__subtypes__[cls] = []
             cls.__feat_enums__[cls] = set()
             cls.__feat_unions__[cls] = set()
@@ -75,7 +129,10 @@ class Modelable(BaseModel):
     @classmethod
     def _extend_pydantic_enum(cls, subtype: type['Modelable'], enum_type: type[aenum.Enum]) -> None:
         """Extend an enum with the value provided by `subtype`."""
-        discriminator_key = cls.__discriminator__[cls]
+        # Defensive-coding/mypy: expresses our assumption that calling this code means we _HAVE_ a discriminator
+        discriminator_config = cls.__discriminator__[cls]
+        assert discriminator_config is not None
+        discriminator_key, _ = discriminator_config
         assert discriminator_key is not None # for mypy
         discriminator = subtype.model_fields[discriminator_key]
         annotation = discriminator.annotation
@@ -90,29 +147,67 @@ class Modelable(BaseModel):
     @classmethod
     def _extend_pydantic_union(cls, _: type['Modelable'], union_spec: tuple[str, type[BaseModel]]) -> None:
         """Rewrites a model's discriminated union field with the available subtypes."""
-        #
         # TODO(joa) Features to add:
         #  - Ordering of model rebuilding after adding a new alternative for discriminated unions (after X ?)
-        #  - Specifying the default value behavior for the Union (first loaded ? Hardcoded ? other ?)
-        #
+
+        # Defensive-coding/mypy: expresses our assumption that calling this code means we _HAVE_ a discriminator
+        discriminator_config = cls.__discriminator__[cls]
+        assert discriminator_config is not None
+
         attr_name, union_type = union_spec
-        discriminator_key = cls.__discriminator__[cls]
+        discriminator_key, (default_policy, default_tag) = discriminator_config
         alternatives = cls.__subtypes__[cls]
 
         #
         # Prepare Optional default value for discriminated union
         #
-        default_factory: Callable[[], BaseModel] | None = None
-        # if default is not None:
-        #     discriminated_field = default.model_fields[discriminator]
-        #     # NOTE(david): Make mypy happy
-        #     assert discriminated_field.annotation is not None
-        #     default_discriminator = discriminated_field.annotation.__args__[0]
-        #     # Set the specified default. it MUST be instanciable without args
-        #     # for the model not to fail to instanciate by default
-        #     def _default_factory():
-        #         return default(**{discriminator: default_discriminator})
-        #     default_factory = _default_factory
+        def _resolve_discriminator_defaults() -> tuple[str | None, type[Modelable] | None]:
+            nonlocal default_policy
+            nonlocal default_tag
+            def _get_tag(item: type[Modelable]) -> str:
+                item_discriminator = item.model_fields[discriminator_key]
+                # NOTE(david): Make mypy happy
+                assert item_discriminator.annotation is not None
+                return cast(str, item_discriminator.annotation.__args__[0])
+
+            default_type: type[Modelable] | None
+            match default_policy:
+                case DefaultDiscriminatorPolicy.FIRST_REGISTERED:
+                    default_type = alternatives[0]
+                    default_tag = _get_tag(default_type)
+                case DefaultDiscriminatorPolicy.LAST_REGISTERED:
+                    default_type = alternatives[-1]
+                    default_tag = _get_tag(default_type)
+                case DefaultDiscriminatorPolicy.PREDETERMINED:
+                    for alt in alternatives:
+                        alt_discriminator = alt.model_fields[discriminator_key]
+                        assert alt_discriminator.annotation is not None
+                        if default_tag in alt_discriminator.annotation.__args__:
+                            default_type = alt
+                            break
+                    else:
+                        # Here, we failed to find the specified default to be loaded.
+                        # As we're possibly in an extension's
+                        # `__pydantic_init_subclass__`'s routine, it is
+                        # possible it hasn't been loaded yet.
+                        # As such, we cannot "fail" or raise here, as we "hope"
+                        # that the default will somehow be loaded later on, and
+                        # then properly set into the discriminated union field
+                        # parameters.
+                        default_tag, default_type = None, None
+                case DefaultDiscriminatorPolicy.NONE:
+                    default_tag, default_type = None, None
+
+            return default_tag, default_type
+
+        default_factory: Callable[[], Modelable] | None = None
+        default_tag, default_type = _resolve_discriminator_defaults()
+        if default_type is not None:
+            # Set the specified default. it MUST be instanciable without args
+            # for the model not to fail to instanciate by default
+            def _default_factory() -> Modelable:
+                return default_type(**{discriminator_key: default_tag})
+            default_factory = _default_factory
 
         field_args: dict[str, Any] = {}
         # discriminated union only works with at least 2 distinct values
