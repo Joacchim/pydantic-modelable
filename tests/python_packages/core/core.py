@@ -1,10 +1,11 @@
 """Example module using pydantic_modelable to create extensible models."""
 
+from typing import Any
 
 import aenum
 from pydantic import BaseModel
 
-from pydantic_modelable import Modelable, ModelableEnumMixin
+from pydantic_modelable import Modelable, ModelableEnumMixin, PluginLoader
 
 
 class BaseDiscriminated(Modelable, discriminator='mtype'):
@@ -24,3 +25,7 @@ class AutoExtensibleContainer(BaseModel):
 @BaseDiscriminated.extends_enum
 class AutoExtensibleEnum(ModelableEnumMixin, str, aenum.Enum):  # type: ignore
     """Example Enum to be 'redefined' through extending BaseDiscriminated."""
+
+
+loader = PluginLoader[Any]('core')
+loader.load()
