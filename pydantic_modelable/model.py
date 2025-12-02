@@ -113,7 +113,7 @@ class Modelable(BaseModel):
         # Using `Any` for simplification
         annotation: Any,
         # Likewise, Callable return type can only be specified at runtime.
-        default_factory: Callable[[], BaseModel] | None = None,
+        default_factory: Callable[[], BaseModel|None] | None = None,
     ) -> None:
         """Inspired heavily by what is done inside `ModelMetaclass.__new__`.
 
@@ -306,5 +306,32 @@ class Modelable(BaseModel):
             if not isinstance(decorable, type) or BaseModel not in decorable.mro():
                 raise TypeError('Unable to extend any other model type than a descendant of pydantic.BaseModel.')
             return cls._register_item(cls.__feat_unions__[cls], (attr_name, decorable), cls._extend_pydantic_union)[1]
+
+        return _wrapper
+
+    @classmethod
+    def as_attribute(
+        cls,
+        attr_name: str,
+        optional: bool = False,
+        default_factory: Callable[[], BaseModel|None] | None = None,
+    ) -> Callable[[type[BaseModel]], type[BaseModel]]:
+        """Register a custom pydantic.BaseModel-based class an an attribute.
+
+        name: name of the attribute to be registered in cls
+        default_factory: Optional argument-less callable which returns a valid
+                         instance of the decorated model. Used to provide valid
+                         defaults when necessary/useful.
+        """
+        def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
+            if not isinstance(decorable, type) or BaseModel not in decorable.mro():
+                raise TypeError(
+                    'Unable to use a custom model type not descending from pydantic.BaseModel as an attribute.'
+                )
+            if optional:
+                cls.set_field_on_model(cls, attr_name, decorable|None, default_factory)
+            else:
+                cls.set_field_on_model(cls, attr_name, decorable, default_factory)
+            return decorable
 
         return _wrapper
