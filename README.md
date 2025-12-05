@@ -22,20 +22,21 @@ and `pydantic_modelable`, as it may provide the following benefits:
    tooling or framework (ex: FastAPI's OpenAPI Schema generation tooling)
 
 With a few additional parameters to your model's constructor, inheriting from
-`pydantic_modelable.Modelable`, you can thus configure various behaviors for
+`pydantic_modelable.Modelable`, you can thus configure specific behaviors for
 your extensible model:
  - discriminated union: `discriminator=attr_name`
- -
 
 You can then register other models into your base model using decorators
 embedded into your base model by the `pydantic_modelable.Modelable` class:
  - `extends_enum`
  - `extends_union(dicriminated_union_attr_name: str)`
+ - `as_attribute(attr_name: str, optional: bool, default_factory: Callable[[], BaseModel])`
 
 
-## Usages of `pydantic_modelable`
+## Limitations
 
-The following documents will describe the various uses of `pydantic_modelable`:
-
- - [Discriminated unions](doc/examples/discriminated_union.md)
- - [Extensible models](doc/examples/extensible_models.md)
+As pydantic-modelable relies on altering the pydantic models at runtime, the
+type-checking tools are usually not able to understand that the model was
+extended and its type signature was changed. This, sadly, often leads to an
+extensive use of `#type: ignore` directives in the code relating to the use
+of the extended models.

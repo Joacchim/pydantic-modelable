@@ -37,12 +37,15 @@ class PluginLoader(Generic[LoadedEntry]):
     def __init__(self, root_module_name: str = 'pydantic-modelable', load_attribute: str|None = None) -> None:
         """Instanciate and Configure a PluginLoader object.
 
-        root_module_name: Optional name of the python module to load dependants
-                          for. Defaults to pydantic_modelable.
-        load_attribute: Optional attribute name, for situations where the
-                        wanted item is an attribute of the module, and not the
-                        whole module.
-        depend_on: Name of the module we're looking up the dependants for
+        The object's initialization parameters allow defining how the plugin
+        modules will be loaded:
+
+         - `root_module_name`: Optional name of the python module to load
+           dependants for. Defaults to pydantic_modelable.
+         - `load_attribute`: Optional attribute name, for situations where the
+           wanted item is an attribute of the module, and not the whole module.
+         - `depend_on`: Name of the module for which we want to load the
+           "extensions" (module depending on it).
         """
         self._depend_on = root_module_name
         self._load_attr = load_attribute
@@ -97,7 +100,11 @@ class PluginLoader(Generic[LoadedEntry]):
         return dependants
 
     def load(self) -> None:
-        """Load all the modules depending (directly or indirectly) on `depend_on`."""
+        """Load all the modules depending (directly or indirectly) on `depend_on`.
+
+        The modules are loaded based on the initialization parameter of the
+        loader object (module name, specific attribute or not, etc).
+        """
         self._load_modules(self._lookup_dependants())
 
     @property
