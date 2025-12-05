@@ -13,7 +13,6 @@ nav:
   - How-Tos:
     - Extending models: examples/extensible_model.md
     - Extending Discriminated unions: examples/discriminated_union.md
-    - Loading your module's extensions: examples/load_extensions.md
   - API Documentation:
     - Models: api/model.md
     - Mixins: api/mixins.md
