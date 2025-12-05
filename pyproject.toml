@@ -45,6 +45,10 @@ test = [
     "ruff==0.13.2",
     "pytest",
 ]
+doc = [
+    "mkdocs",
+    "mkdocstrings[python]",
+]
 
 [project.urls]
 Homepage = 'https://github.com/Joacchim/pydantic-modelable'
