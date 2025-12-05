@@ -38,3 +38,4 @@ embedded into your base model by the `pydantic_modelable.Modelable` class:
 The following documents will describe the various uses of `pydantic_modelable`:
 
  - [Discriminated unions](doc/examples/discriminated_union.md)
+ - [Extensible models](doc/examples/extensible_models.md)

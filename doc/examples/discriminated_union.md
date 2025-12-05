@@ -1,10 +1,10 @@
-# Defining Extensible pydantic discriminated unions
+# Defining Extensible pydantic discriminated unions with pydantic-modelable
 
 In a context of `pydantic` validated data, `discriminated unions` is a very
 practical feature, allowing to determine a sub-element's type based on one of
 its inner values.
 
-The following section shows how `pydantic_modelable` allows extending types to
+The following section shows how `pydantic-modelable` allows extending types to
 aggregate extensions under `discriminated unions`.
 
 
@@ -12,7 +12,7 @@ aggregate extensions under `discriminated unions`.
 
 As an example, we'll define an animal "shelter" project, defining the
 "architecture" of the shelter, represented through pydantic Models, extended
-using the `pydantic_modelable` module.
+using the `pydantic-modelable` module.
 
 As such, we'll define here:
  - A base model `Animal`, which defines the discriminator and can be inherited
@@ -97,7 +97,7 @@ class Cat(Animal):
 To use these additional `Animal` definitions your shelter module, one would
 only need to load them into python.
 
-| :memo::exclamation: | Currently, `pydantic_modelable` does not offer any way to automatically load the extensions |
+| :memo::exclamation: | Currently, `pydantic-modelable` does not offer any way to automatically load the extensions |
 |---------------------|:--------------------------------------------------------------------------------------------|
 
 Once the `shelter` is loaded along with the two extensions modules previously

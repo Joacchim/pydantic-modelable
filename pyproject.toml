@@ -78,5 +78,9 @@ flake8-quotes = {inline-quotes = 'single'}
 isort = { known-first-party = ['pydantic_modelable', 'tests'] }
 mccabe = { max-complexity = 14 }
 
+[tool.ruff.lint.extend-per-file-ignores]
+# Conflict between linter and type-checker. Privilege type-checker.
+"tests/func/test_attr_registration.py" = ["B009", "PIE804"]
+
 [tool.ruff.format]
 quote-style = 'single'
