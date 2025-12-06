@@ -23,6 +23,15 @@ class PluginLoader(Generic[LoadedEntry]):
 
     The provided type should ideally be a typing.Protocol based type, ensuring
     the loaded modules and/or attributes are loosely tied to the type-hint.
+
+    To use it, one should preferably specify the LoadedEntry type explicitly:
+    ```py
+    from typing import Any
+    from pydantic_modelable import PluginLoader
+
+    # Here we load whole modules, so `Any` is our best fit :(
+    loader = PluginLoader[Any]('my-module')
+    ```
     """
 
     def __init__(self, root_module_name: str = 'pydantic-modelable', load_attribute: str|None = None) -> None:
@@ -91,6 +100,7 @@ class PluginLoader(Generic[LoadedEntry]):
         """Load all the modules depending (directly or indirectly) on `depend_on`."""
         self._load_modules(self._lookup_dependants())
 
+    @property
     def loaded(self) -> dict[str, LoadedEntry]:
         """Return a shallow copy of the loaded modules dict.
 
