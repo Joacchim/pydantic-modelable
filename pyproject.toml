@@ -51,7 +51,7 @@ doc = [
 ]
 
 [project.urls]
-Homepage = 'https://github.com/Joacchim/pydantic-modelable'
+Homepage = 'https://joacchim.github.io/pydantic-modelable/'
 Source = 'https://github.com/Joacchim/pydantic-modelable'
 
 [tool.ruff]
