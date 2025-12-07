@@ -1,0 +1,20 @@
+site_name: pydantic-modelable
+docs_dir: doc
+watch:
+  - doc/
+theme: readthedocs
+
+plugins:
+  - search
+  - mkdocstrings
+
+nav:
+  - Home: index.md
+  - How-Tos:
+    - Extending models: examples/extensible_model.md
+    - Extending Discriminated unions: examples/discriminated_union.md
+  - API Documentation:
+    - Models: api/model.md
+    - Mixins: api/mixins.md
+    - Loader utilities: api/loader.md
+    - Changelog: api/changelog.md

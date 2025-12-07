@@ -12,15 +12,23 @@ from pydantic_core import CoreSchema, core_schema
 
 
 class ModelableEnumMixin:
-    """A mixin allowing to define a `aenum`-base Enum.
+    """A mixin allowing to define an extensible `aenum`-based StrEnum.
 
-    Enum is extended using the defined discriminator values of a Modelable
-    discriminated union model. To define such an extendable enum, one may
-    write:
+    It must be used to define an enum that can be extended using the class
+    decorator `pydantic_modelable.model.Modelable.extend_enum()`.
+
+    The Mixin can be used with additional subclass parameters, to define
+    specificities of the json_schema, so that this extended enum may fulfill
+    its role fully when included in pydantic-based API:
     ```py
-    from pydantic_modelable.enum import StrEnumMixin
+    from pydantic_modelable.mixins import ModelableEnumMixin
 
-    class ExampleEnum1(StrEnumMixin, str, aenum.Enum):
+    class MyExtensibleEnum(
+        ModelableEnumMixin,
+        schema_title='MyExtensibleEnum',
+        schema_description='This is my Enum',
+        str, aenum.Enum,
+    ):
         ...
     ```
     """
@@ -33,8 +41,11 @@ class ModelableEnumMixin:
     def __init_subclass__(cls, schema_title: str = '', schema_description: str = '', **kwargs: Any) -> None:
         """Initialize the ModelableEnumMixin with subclass custom parameters.
 
-        Parameters are used to customize the Schema model to be generated
-        (description, title, etc).
+        Keyword parameters are used to customize the Schema model to be
+        generated:
+
+         - `schema_title`: The title of the model's generated schema
+         - `schema_description`: The description of the model's generated schema
         """
         super().__init_subclass__(**kwargs)
         cls.__schema_title__ = schema_title if schema_title else f'{cls.__name__}'

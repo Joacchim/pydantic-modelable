@@ -14,6 +14,7 @@ extensibility of the models.
 
 It can be very useful to define extensible models relying on this mechanism,
 and `pydantic_modelable`, as it may provide the following benefits:
+
  - Reduction of code maintenance (defining an "extension" registers it
    automatically wherever the base was setup)
  - Easy extension of a core library's models and features through the loading
@@ -40,3 +41,11 @@ type-checking tools are usually not able to understand that the model was
 extended and its type signature was changed. This, sadly, often leads to an
 extensive use of `#type: ignore` directives in the code relating to the use
 of the extended models.
+
+
+## Usages of `pydantic_modelable`
+
+The following documents will describe the various uses of `pydantic_modelable`:
+
+ - [Discriminated unions](examples/discriminated_union.md)
+ - [Extensible models](examples/extensible_model.md)

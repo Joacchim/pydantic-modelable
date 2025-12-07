@@ -30,14 +30,14 @@ def test_plugin_loader_lookup_dependants(module: str | None, expected: set[str])
 
 def test_core_loaded_plugins() -> None:
     """Test PluginLoader._lookup_dependants internal function."""
-    assert set(core.loader.loaded().keys()) == {'ext1', 'ext2'}
+    assert set(core.loader.loaded.keys()) == {'ext1', 'ext2'}
 
 
 def test_extended_enum() -> None:
     """Tests that an enum is properly extended."""
     assert len(list(typing.cast(aenum.Enum, core.AutoExtensibleEnum))) == 2
-    assert core.loader.loaded()['ext1'].ExtensionOne().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
-    assert core.loader.loaded()['ext2'].ExtensionTwo().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
+    assert core.loader.loaded['ext1'].ExtensionOne().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
+    assert core.loader.loaded['ext2'].ExtensionTwo().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
 
 
 def test_extended_union() -> None:
@@ -52,12 +52,12 @@ def test_extended_union() -> None:
     assert len(typing_args) == 2
     # Ensure all expected types are set
     types = [annotation.__args__[0] for annotation in typing_args]
-    assert core.loader.loaded()['ext1'].ExtensionOne in types
-    assert core.loader.loaded()['ext2'].ExtensionTwo in types
+    assert core.loader.loaded['ext1'].ExtensionOne in types
+    assert core.loader.loaded['ext2'].ExtensionTwo in types
     # Ensure all expected discriminator literals (tags) are set
     tags = [annotation.__metadata__[0].tag for annotation in typing_args]
-    assert core.loader.loaded()['ext1'].ExtensionOne().mtype in tags
-    assert core.loader.loaded()['ext2'].ExtensionTwo().mtype in tags
+    assert core.loader.loaded['ext1'].ExtensionOne().mtype in tags
+    assert core.loader.loaded['ext2'].ExtensionTwo().mtype in tags
 
 
 @pytest.mark.parametrize('behavior',

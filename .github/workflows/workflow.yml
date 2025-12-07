@@ -24,6 +24,29 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
 
+
+  publish-doc:
+    name: Upload doc to GH Pages
+    needs:
+      - check
+      - run-tox
+    if: needs.check.outputs.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+    # Specify runner + deployment step
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: doc-deployment
+        uses: actions/deploy-pages@v4 # or specific "vX.X.X" version tag for this action
+
+
   pypi-publish:
     name: upload release to PyPI
     needs: [check]

@@ -105,7 +105,7 @@ class Modelable(BaseModel):
             cls.__subtypes__[base].append(cls)
 
     @classmethod
-    def set_field_on_model(
+    def _set_field_on_model(
         cls,
         model: type[BaseModel],
         name: str,
@@ -228,7 +228,7 @@ class Modelable(BaseModel):
             Field(**field_args),
         ]
 
-        cls.set_field_on_model(
+        cls._set_field_on_model(
             union_type,
             attr_name,
             holder_annotation,
@@ -293,13 +293,14 @@ class Modelable(BaseModel):
     def extends_union(cls, attr_name: str) -> Callable[[type[BaseModel]], type[BaseModel]]:
         """Decorate pydantic.BaseModel classes.
 
-        Register the decorated class as a Model containing a field that will be
-        rewritten as a discriminated Union, made up of all the child Classes of
-        the lass inheriting `Modelable`.
+        The decorated class, must be a `pydantic.BaseModel`. It should contain
+        a field, that the decorator rewrites as a discriminated Union. The
+        discriminated union thus configured is made up of all the subclasses of
+        the class inheriting `Modelable`.
 
-        The field hinted at by `attr_name` will be fully overwritten as a
-        Discriminated Union field, and its initial type annotation will not be
-        accounted for.
+        The parameter `attr_name` tells the decorator what attribute from the
+        decorated model should be overwritten as a Discriminated Union field,
+        and its initial type annotation will not be accounted for.
         """
 
         def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
@@ -318,10 +319,14 @@ class Modelable(BaseModel):
     ) -> Callable[[type[BaseModel]], type[BaseModel]]:
         """Register a custom pydantic.BaseModel-based class an an attribute.
 
-        name: name of the attribute to be registered in cls
-        default_factory: Optional argument-less callable which returns a valid
-                         instance of the decorated model. Used to provide valid
-                         defaults when necessary/useful.
+        The attribute to be registered is controlled by the decorator's
+        parameters:
+
+         - `name`: name of the attribute to be registered in the decorating
+           class
+         - `default_factory`: Optional callable which takes no parameters, and
+           returns a valid instance of the decorated model. Used to provide
+           valid defaults when necessary/useful.
         """
         def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
             if not isinstance(decorable, type) or BaseModel not in decorable.mro():
@@ -329,9 +334,9 @@ class Modelable(BaseModel):
                     'Unable to use a custom model type not descending from pydantic.BaseModel as an attribute.'
                 )
             if optional:
-                cls.set_field_on_model(cls, attr_name, decorable|None, default_factory)
+                cls._set_field_on_model(cls, attr_name, decorable|None, default_factory)
             else:
-                cls.set_field_on_model(cls, attr_name, decorable, default_factory)
+                cls._set_field_on_model(cls, attr_name, decorable, default_factory)
             return decorable
 
         return _wrapper

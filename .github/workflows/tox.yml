@@ -11,6 +11,9 @@ jobs:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
         tox-env: ['lint', 'typecheck', 'func']
+        include:
+          - python-version: '3.10'
+            tox-env: 'doc'
     steps:
     - uses: actions/checkout@v5
     - uses: actions/setup-python@v6
@@ -22,3 +25,8 @@ jobs:
         python -m pip install tox==4.30.0
     - name: Run env
       run: tox -e ${{ matrix.tox-env }}
+    - name: Upload generated doc as pages-artifact
+      if: ${{ matrix.tox-env == 'doc' }}
+      uses: actions/upload-pages-artifact@v3 # or specific "vX.X.X" version tag for this action
+      with:
+        path: site/
