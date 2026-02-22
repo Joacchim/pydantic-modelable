@@ -112,6 +112,35 @@ Here, we've defined a default_factory to ensure that by default, the new
 `CatsSection` will be instanciated with specific values, as any default value
 would do by declaring them in front of the attribute declaration.
 
+
+### Ensuring container models including your Modelable are consistent
+
+Pydantic relies on an internal representation of the Model, the `core schema`,
+which is built upon completing the declaration of the Model itself. As this
+schema is used for serialization and deserialization, it is of utmost
+importance to ensure it is properly rebuilt each time a `Modelable` is modified
+by one of its extensions.
+
+To solve this issue, the `Modelable` model offers a class decorator that
+triggers the rebuild of the decorated model, every time the `Modelable`
+subclass's internal representation is rebuilt. Thus, you will be able to ensure
+a containing model will be kept up-to-date with the actual form of your
+`Modelable` subclass.
+
+In a similar manner, all classes in the model hierarchy that are in the higher
+layers than your `Modelable` subclass should be decorated the same way,
+ensuring they're properly rebuilt whenever your model is updated.
+
+In our case, it would take the following form:
+
+```py
+@Sections.rebuilds_model
+class Shelter(Modelable):
+    admin_office: AdministrativeOffice = AdministrativeOffice()
+    sections: Sections
+```
+
+
 ## Actual form of the modules (once extensions are loaded)
 
 With the shelter module loaded, along with both extensions, the original
