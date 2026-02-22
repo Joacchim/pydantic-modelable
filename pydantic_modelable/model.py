@@ -71,6 +71,9 @@ class Modelable(BaseModel):
     __feat_unions__: ClassVar[dict[type['Modelable'], set[tuple[str, type[BaseModel]]]]] = {}
     __feat_enums__: ClassVar[dict[type['Modelable'], set[type[aenum.Enum]]]] = {}
 
+    # maps types to rebuild whenever the Modelable is rebuilt
+    __feat_rebuild__: ClassVar[dict[type['Modelable'], set[type[BaseModel]]]] = {}
+
     @classmethod
     def _parent_modelable(cls) -> type['Modelable']:
         return cls.mro()[1]
@@ -101,6 +104,7 @@ class Modelable(BaseModel):
             cls.__subtypes__[cls] = []
             cls.__feat_enums__[cls] = set()
             cls.__feat_unions__[cls] = set()
+            cls.__feat_rebuild__[cls] = set()
         else:
             cls.__subtypes__[base].append(cls)
 
@@ -125,6 +129,9 @@ class Modelable(BaseModel):
             field_info = FieldInfo(annotation=annotation, default_factory=default_factory)
         model.model_fields.update({name: field_info})
         model.model_rebuild(force=True)
+        # Now rebuild all rebuildable models that include model
+        for rebuildable in cls.__feat_rebuild__[cls]:
+            rebuildable.model_rebuild(force=True)
 
     @classmethod
     def _extend_pydantic_enum(cls, subtype: type['Modelable'], enum_type: type[aenum.Enum]) -> None:
@@ -337,6 +344,24 @@ class Modelable(BaseModel):
                 cls._set_field_on_model(cls, attr_name, decorable|None, default_factory)
             else:
                 cls._set_field_on_model(cls, attr_name, decorable, default_factory)
+            return decorable
+
+        return _wrapper
+
+    @classmethod
+    def rebuilds_model(cls) ->  Callable[[type[BaseModel]], type[BaseModel]]:
+        """Register a model to rebuild, should the Modelable's schema be updated.
+
+        This effectively allows a Modelable subclass to trigger rebuilds of the
+        models that include it.
+
+        Caveat: If the Modelable object is deep within a hierarchy of models,
+        all parent models may require to be decorated to ensure the full core
+        schema of the model hierarchy is updated.
+        """
+        def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
+            collection = cls.__feat_rebuild__.setdefault(cls, set())
+            collection |= {decorable}
             return decorable
 
         return _wrapper

@@ -18,5 +18,6 @@
         - extends_enum
         - extends_union
         - as_attribute
+        - rebuilds_model
       show_root_heading: true
       show_source: false
