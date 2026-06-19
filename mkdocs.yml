@@ -13,8 +13,10 @@ nav:
   - How-Tos:
     - Extending models: examples/extensible_model.md
     - Extending Discriminated unions: examples/discriminated_union.md
+    - Forwarding registrations: examples/forwarding_registrations.md
   - API Documentation:
     - Models: api/model.md
     - Mixins: api/mixins.md
+    - Forwarder: api/forwarder.md
     - Loader utilities: api/loader.md
     - Changelog: api/changelog.md

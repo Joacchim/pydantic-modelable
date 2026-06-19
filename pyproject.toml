@@ -85,6 +85,7 @@ mccabe = { max-complexity = 14 }
 [tool.ruff.lint.extend-per-file-ignores]
 # Conflict between linter and type-checker. Privilege type-checker.
 "tests/func/test_attr_registration.py" = ["B009", "PIE804"]
+"tests/func/test_forwarder.py" = ["B009", "PIE804"]
 
 [tool.ruff.format]
 quote-style = 'single'
