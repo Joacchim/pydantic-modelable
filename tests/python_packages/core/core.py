@@ -2,10 +2,9 @@
 
 from typing import Any
 
-import aenum
 from pydantic import BaseModel
 
-from pydantic_modelable import Modelable, ModelableEnumMixin, PluginLoader
+from pydantic_modelable import Modelable, ModelableStrEnum, PluginLoader
 
 
 class BaseDiscriminated(Modelable, discriminator='mtype'):
@@ -21,9 +20,8 @@ class AutoExtensibleContainer(BaseModel):
     item: BaseDiscriminated
 
 
-# Type hinting must be ignored here due to aenum being untyped :(
 @BaseDiscriminated.extends_enum
-class AutoExtensibleEnum(ModelableEnumMixin, str, aenum.Enum):  # type: ignore
+class AutoExtensibleEnum(ModelableStrEnum):
     """Example Enum to be 'redefined' through extending BaseDiscriminated."""
 
 

@@ -5,12 +5,10 @@ class keeps its own type rather than being erased to `type[BaseModel]` /
 `type[aenum.Enum]`. `assert_type` is verified by `mypy --strict` (run as the
 `typecheck` tox env over `tests/`); at runtime the calls are no-ops.
 """
-import aenum
 from pydantic import BaseModel
 from typing_extensions import assert_type
 
-from pydantic_modelable import Modelable, ModelableForwarder
-from pydantic_modelable.mixins import ModelableEnumMixin
+from pydantic_modelable import Modelable, ModelableForwarder, ModelableStrEnum
 
 
 class Shelter(Modelable, discriminator='kind'):
@@ -21,7 +19,7 @@ class ShelterForwarder(ModelableForwarder, forwards_to=Shelter):
     """Registration proxy delegating to `Shelter`."""
 
 
-class ExtensibleEnum(ModelableEnumMixin, str, aenum.Enum):  # type: ignore
+class ExtensibleEnum(ModelableStrEnum):
     """Extensible enum base for the `extends_enum` test."""
 
 
@@ -68,3 +66,17 @@ def test_forwarder_preserves_type() -> None:
         x: int
 
     assert_type(ViaForwarder, type[ViaForwarder])
+
+
+def test_modelable_str_enum_is_a_typed_enum() -> None:
+    """A `ModelableStrEnum` subclass is understood as a real enum.
+
+    Iterating it would be an error if the visible base were the untyped
+    `aenum.Enum` (as it was before `ModelableStrEnum`), forcing a `# type:
+    ignore`. Members are injected at runtime, so the set is empty here.
+    """
+    class Species(ModelableStrEnum):
+        """Empty extensible enum; extensions add members at runtime."""
+
+    members = list(Species)
+    assert_type(members, list[Species])

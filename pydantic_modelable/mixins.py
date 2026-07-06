@@ -1,6 +1,6 @@
 """Mixins classes for using pydantic_modelable."""
 
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import aenum
 from pydantic import (
@@ -17,17 +17,17 @@ class ModelableEnumMixin:
     It must be used to define an enum that can be extended using the class
     decorator `pydantic_modelable.model.Modelable.extend_enum()`.
 
-    The Mixin can be used with additional subclass parameters, to define
-    specificities of the json_schema, so that this extended enum may fulfill
-    its role fully when included in pydantic-based API:
+    Prefer inheriting `pydantic_modelable.ModelableStrEnum`, which bundles this
+    mixin with the correct enum bases and stays type-checker friendly. Subclass
+    parameters customise the generated json_schema so the extended enum fulfils
+    its role when included in a pydantic-based API:
     ```py
-    from pydantic_modelable.mixins import ModelableEnumMixin
+    from pydantic_modelable import ModelableStrEnum
 
     class MyExtensibleEnum(
-        ModelableEnumMixin,
+        ModelableStrEnum,
         schema_title='MyExtensibleEnum',
         schema_description='This is my Enum',
-        str, aenum.Enum,
     ):
         ...
     ```
@@ -90,3 +90,33 @@ class ModelableEnumMixin:
             'title': cls.__schema_title__,
             'description': cls.__schema_description__,
         }
+
+
+# `aenum` ships no type information, so `aenum.Enum` is `Any` to a type checker.
+# Presenting the standard-library `enum.Enum` as the base *for type-checking
+# only* lets checkers recognise subclasses as real enums (iterable,
+# constructible, no "cannot subclass Any" under strict), while the runtime keeps
+# the `aenum` base that `extends_enum` needs to inject members dynamically. Both
+# bases yield the same MRO (`ModelableEnumMixin`, `str`, an `Enum`).
+if TYPE_CHECKING:
+    import enum
+
+    _StrEnumImpl = enum.Enum
+else:
+    _StrEnumImpl = aenum.Enum
+
+
+class ModelableStrEnum(ModelableEnumMixin, str, _StrEnumImpl):
+    """Base class for extensible string enums.
+
+    Inherit from this rather than spelling out
+    `(ModelableEnumMixin, str, aenum.Enum)`. At runtime it is exactly that — an
+    empty `aenum` string enum, extended in place by
+    `pydantic_modelable.Modelable.extends_enum` — but type checkers see a
+    standard `enum.Enum`, so subclasses are understood as enums without an
+    `aenum`-induced `# type: ignore`.
+
+    The `schema_title` / `schema_description` subclass keyword arguments provided
+    by `ModelableEnumMixin` are accepted as usual.
+    """
+

@@ -13,6 +13,11 @@
 
 ### Features:
 
+ - `pydantic_modelable.ModelableStrEnum`, a base class for extensible string
+   enums. It is an `aenum`-based str Enum at runtime (extended in place by
+   `extends_enum`) but is seen as a standard `enum.Enum` by type-checkers, so
+   subclasses are recognised as enums without the `# type: ignore` that
+   `aenum`'s untyped base previously required under strict settings.
  - `pydantic_modelable.forwarder.ModelableForwarder`, a registration proxy that
    delegates the `Modelable` decorators (`as_attribute`, `extends_union`,
    `extends_enum`, `rebuilds_model`) to a target `Modelable`, letting a module

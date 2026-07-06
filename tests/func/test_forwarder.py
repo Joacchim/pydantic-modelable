@@ -1,12 +1,11 @@
 """Tests for ModelableForwarder, delegating Modelable registration to a target."""
 
 import typing
-from typing import Literal, cast
+from typing import Literal
 
-import aenum
 from pydantic import BaseModel
 
-from pydantic_modelable import Modelable, ModelableEnumMixin, ModelableForwarder
+from pydantic_modelable import Modelable, ModelableForwarder, ModelableStrEnum
 
 
 def test_forward_as_attribute() -> None:
@@ -82,7 +81,7 @@ def test_forward_extends_enum() -> None:
     class BaseForwarder(ModelableForwarder, forwards_to=Base): ...
 
     @BaseForwarder.extends_enum
-    class ForwardedEnum(ModelableEnumMixin, str, aenum.Enum):  # type: ignore[misc]
+    class ForwardedEnum(ModelableStrEnum):
         ...
 
     class One(Base):
@@ -91,7 +90,7 @@ def test_forward_extends_enum() -> None:
     class Two(Base):
         mtype: Literal['two'] = 'two'
 
-    assert len(list(cast(aenum.Enum, ForwardedEnum))) == 2
+    assert len(list(ForwardedEnum)) == 2
 
 
 def test_forward_rebuilds_model() -> None:
