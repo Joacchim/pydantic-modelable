@@ -2,6 +2,15 @@
 
 ## In development:
 
+### Improvements:
+
+ - The registration decorators (`as_attribute`, `extends_union`,
+   `extends_enum`, `rebuilds_model`, on both `Modelable` and
+   `ModelableForwarder`) are now identity-preserving: the decorated class keeps
+   its own type instead of being erased to `type[BaseModel]` /
+   `type[aenum.Enum]`, removing the need for `# type: ignore` at decoration
+   sites.
+
 ### Features:
 
  - `pydantic_modelable.forwarder.ModelableForwarder`, a registration proxy that

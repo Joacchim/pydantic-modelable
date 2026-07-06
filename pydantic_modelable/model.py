@@ -12,6 +12,12 @@ from .mixins import ModelableEnumMixin
 
 T = TypeVar('T', bound='type[aenum.Enum]|tuple[str,type[BaseModel]]')
 
+# Identity-preserving TypeVars for the class decorators: they return the very
+# class they decorate, so the decorated class keeps its own type instead of
+# being erased to `type[BaseModel]` / `type[aenum.Enum]`.
+M = TypeVar('M', bound=type[BaseModel])
+E = TypeVar('E', bound=type[aenum.Enum])
+
 
 class DefaultDiscriminatorPolicy(enum.Enum):
     """Describes the method used to determine a Discriminator's default value.
@@ -279,7 +285,7 @@ class Modelable(BaseModel):
         return item_type
 
     @classmethod
-    def extends_enum(cls, decorable: type[aenum.Enum]) -> type[aenum.Enum]:
+    def extends_enum(cls, decorable: E) -> E:
         """Decorate String Enum classes based on aenum.Enum.
 
         Register the decorated class as an Enum to be extended with the
@@ -294,10 +300,11 @@ class Modelable(BaseModel):
             raise TypeError(
                 'Unable to extend any other enum type than an aenum.Enum, including the ModelableEnumMixin.'
             )
-        return cls._register_item(cls.__feat_enums__[cls], decorable, cls._extend_pydantic_enum)
+        cls._register_item(cls.__feat_enums__[cls], decorable, cls._extend_pydantic_enum)
+        return decorable
 
     @classmethod
-    def extends_union(cls, attr_name: str) -> Callable[[type[BaseModel]], type[BaseModel]]:
+    def extends_union(cls, attr_name: str) -> Callable[[M], M]:
         """Decorate pydantic.BaseModel classes.
 
         The decorated class, must be a `pydantic.BaseModel`. It should contain
@@ -310,10 +317,12 @@ class Modelable(BaseModel):
         and its initial type annotation will not be accounted for.
         """
 
-        def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
+        def _wrapper(decorable: M) -> M:
             if not isinstance(decorable, type) or BaseModel not in decorable.mro():
                 raise TypeError('Unable to extend any other model type than a descendant of pydantic.BaseModel.')
-            return cls._register_item(cls.__feat_unions__[cls], (attr_name, decorable), cls._extend_pydantic_union)[1]
+            union_spec: tuple[str, type[BaseModel]] = (attr_name, decorable)
+            cls._register_item(cls.__feat_unions__[cls], union_spec, cls._extend_pydantic_union)
+            return decorable
 
         return _wrapper
 
@@ -323,7 +332,7 @@ class Modelable(BaseModel):
         attr_name: str,
         optional: bool = False,
         default_factory: Callable[[], BaseModel|None] | None = None,
-    ) -> Callable[[type[BaseModel]], type[BaseModel]]:
+    ) -> Callable[[M], M]:
         """Register a custom pydantic.BaseModel-based class an an attribute.
 
         The attribute to be registered is controlled by the decorator's
@@ -335,7 +344,7 @@ class Modelable(BaseModel):
            returns a valid instance of the decorated model. Used to provide
            valid defaults when necessary/useful.
         """
-        def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
+        def _wrapper(decorable: M) -> M:
             if not isinstance(decorable, type) or BaseModel not in decorable.mro():
                 raise TypeError(
                     'Unable to use a custom model type not descending from pydantic.BaseModel as an attribute.'
@@ -349,7 +358,7 @@ class Modelable(BaseModel):
         return _wrapper
 
     @classmethod
-    def rebuilds_model(cls) ->  Callable[[type[BaseModel]], type[BaseModel]]:
+    def rebuilds_model(cls) ->  Callable[[M], M]:
         """Register a model to rebuild, should the Modelable's schema be updated.
 
         This effectively allows a Modelable subclass to trigger rebuilds of the
@@ -359,7 +368,7 @@ class Modelable(BaseModel):
         all parent models may require to be decorated to ensure the full core
         schema of the model hierarchy is updated.
         """
-        def _wrapper(decorable: type[BaseModel]) -> type[BaseModel]:
+        def _wrapper(decorable: M) -> M:
             collection = cls.__feat_rebuild__.setdefault(cls, set())
             collection |= {decorable}
             return decorable
