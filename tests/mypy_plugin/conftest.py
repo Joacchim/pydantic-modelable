@@ -54,6 +54,49 @@ class MypyResult:
 
 RunMypy = Callable[..., MypyResult]
 RunMypyPackage = Callable[..., MypyResult]
+RunMypyIncremental = Callable[..., tuple[MypyResult, MypyResult]]
+
+
+@pytest.fixture
+def run_mypy_incremental(tmp_path: Path) -> RunMypyIncremental:
+    """Run `mypy` over fixture modules twice, with a persistent cache and an edit between.
+
+    Simulates the incremental / daemon workflow: the first pass populates the
+    cache, then `touch` is edited and the second pass reuses the cache for the
+    unchanged modules. Each `api.run` builds a fresh plugin instance, so the
+    second pass genuinely relies on cache-backed discovery, not the first pass's
+    in-memory state. Returns both results.
+    """
+
+    def _run(*modules: str, touch: str, plugin: bool = True) -> tuple[MypyResult, MypyResult]:
+        for module in modules:
+            shutil.copy(_FUNC_FIXTURES / module, tmp_path / module)
+        plugins = 'plugins = pydantic_modelable_mypy.plugin' if plugin else ''
+        search_path = os.pathsep.join((str(_REPO_ROOT), str(tmp_path)))
+        config = tmp_path / 'mypy.ini'
+        config.write_text(
+            '[mypy]\n'
+            'strict = True\n'
+            f'mypy_path = {search_path}\n'
+            f'cache_dir = {tmp_path / ".mypy_cache"}\n'
+            f'{plugins}\n'
+            '[mypy-aenum.*]\n'
+            'ignore_missing_imports = True\n'
+        )
+        targets = [str(tmp_path / module) for module in modules]
+
+        def _once() -> MypyResult:
+            stdout, _stderr, exit_status = api.run(['--config-file', str(config), *targets])
+            errors = sum(1 for line in stdout.splitlines() if ': error:' in line)
+            return MypyResult(output=stdout, errors=errors, exit_status=exit_status)
+
+        first = _once()
+        touched = tmp_path / touch
+        touched.write_text(f'{touched.read_text()}\n# incremental edit\n')
+        second = _once()
+        return first, second
+
+    return _run
 
 
 @pytest.fixture

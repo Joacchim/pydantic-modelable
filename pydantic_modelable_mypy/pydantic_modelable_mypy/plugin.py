@@ -25,7 +25,8 @@ from mypy.nodes import (
     TypeInfo,
     Var,
 )
-from mypy.plugin import ClassDefContext, FunctionSigContext, Plugin
+from mypy.options import Options
+from mypy.plugin import AttributeContext, ClassDefContext, FunctionSigContext, Plugin
 from mypy.plugins.common import add_attribute_to_class
 from mypy.types import CallableType, FunctionLike, Instance, NoneType, ProperType, Type, UnionType, get_proper_type
 
@@ -34,49 +35,236 @@ from mypy.types import CallableType, FunctionLike, Instance, NoneType, ProperTyp
 MODELABLE_FULLNAME = 'pydantic_modelable.model.Modelable'
 
 _AS_ATTRIBUTE = 'as_attribute'
+_EXTENDS_UNION = 'extends_union'
 
 # Parameters of `Modelable.as_attribute`, after the bound `cls`, in order.
 _AS_ATTRIBUTE_PARAMS = ('attr_name', 'optional', 'default_factory')
 
-# Metadata (persisted in mypy's cache) recording, per target `TypeInfo`, the
-# fields we injected and whether each is required at construction — so the
-# constructor signature hook can rediscover them on incremental runs without
-# re-observing the decorator.
+# Metadata persisted in mypy's cache, so the information survives incremental /
+# daemon runs where the module that recorded it is not re-analysed.
 _METADATA_KEY = 'pydantic_modelable'
+# On a target `TypeInfo`: {attr_name: required} injected by `as_attribute`.
 _INJECTED_ATTRS = 'injected_attrs'
+# On a container `TypeInfo`: {attr_name: base_fullname} for `extends_union`.
+_UNION_FIELDS = 'union_fields'
 
 
 class ModelablePlugin(Plugin):
     """Teach mypy about the models `pydantic_modelable` extends at runtime."""
 
+    def __init__(self, options: Options) -> None:
+        """Initialise the per-run caches."""
+        super().__init__(options)
+        # Subtypes discovered during semantic analysis (`get_base_class_hook`).
+        # Reliable for a full run — where module trees may be freed before the
+        # check phase, defeating the module scan — but empty for classes loaded
+        # from cache on an incremental run.
+        self._union_subtypes: dict[str, list[str]] = {}
+        # Same-run supplement to the container's persisted `union_fields`
+        # metadata: covers containers decorated this run before their cache
+        # exists. Keyed by 'Container.attr' fullname -> base fullname.
+        self._union_fields: dict[str, str] = {}
+
     def get_class_decorator_hook_2(self, fullname: str) -> Callable[[ClassDefContext], bool] | None:
         """Dispatch class-decorator analysis for the registration decorators.
 
-        mypy keys this on the decorator's fullname. `as_attribute` is a
-        classmethod inherited from `Modelable`, so a `@Shelter.as_attribute(...)`
-        decorator resolves to `Modelable.as_attribute` regardless of the subclass.
+        mypy keys this on the decorator's fullname. The decorators are
+        classmethods inherited from `Modelable`, so `@Shelter.as_attribute(...)`
+        resolves to `Modelable.as_attribute` regardless of the subclass.
         """
-        if fullname.rsplit('.', 1)[-1] == _AS_ATTRIBUTE:
+        name = fullname.rsplit('.', 1)[-1]
+        if name == _AS_ATTRIBUTE:
             return _as_attribute_hook
+        if name == _EXTENDS_UNION:
+            return self._record_union_field
         return None
+
+    def get_base_class_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
+        """Record subclasses of an extensible `Modelable` base during analysis.
+
+        mypy keys this on the base's fullname. When the base is a proper
+        `Modelable` subclass, the class being defined is one of its union
+        alternatives; recording it here is what makes full runs reliable, since
+        the check-time module scan cannot see trees mypy has freed.
+        """
+        if fullname == MODELABLE_FULLNAME:
+            return None
+        symbol = self.lookup_fully_qualified(fullname)
+        if symbol is None or not isinstance(symbol.node, TypeInfo) or not symbol.node.has_base(MODELABLE_FULLNAME):
+            return None
+        base_fullname = fullname
+
+        def _register(ctx: ClassDefContext) -> None:
+            subtypes = self._union_subtypes.setdefault(base_fullname, [])
+            subtype = ctx.cls.info.fullname
+            if subtype not in subtypes:
+                subtypes.append(subtype)
+
+        return _register
+
+    def get_attribute_hook(self, fullname: str) -> Callable[[AttributeContext], Type] | None:
+        """Type an `extends_union` field as the union of its base's subtypes."""
+        base_fullname = self._union_field_base(fullname)
+        if base_fullname is None:
+            return None
+
+        def _typed(ctx: AttributeContext) -> Type:
+            union = self._build_union(base_fullname)
+            return union if union is not None else ctx.default_attr_type
+
+        return _typed
 
     def get_function_signature_hook(self, fullname: str) -> Callable[[FunctionSigContext], FunctionLike] | None:
-        """Adjust constructor signatures of extended models to accept injected fields.
+        """Adjust constructor signatures of extended models.
 
-        The target's `__init__` is synthesized (pydantic `dataclass_transform`)
-        before the extension's decorator is analysed, so injected fields are
-        absent from it. Rather than re-synthesize `__init__` — which fights that
-        ordering — we widen the signature mypy checks each call against.
+        Two adjustments, both keyed on the callee (constructor) fullname:
 
-        mypy keys this on the callee's fullname; for `Shelter(...)` that is the
-        class fullname. We offer the hook only when the fullname resolves to a
-        `Modelable` subclass, so a plain function returning a `Modelable` is left
-        untouched.
+         - `as_attribute` injects fields whose keyword the synthesized pydantic
+           `__init__` does not know about; we append them.
+         - `extends_union` rewrites a declared field into a discriminated union;
+           we narrow that field's constructor keyword to the union so a bare
+           base instance is rejected, matching runtime validation.
+
+        Offered only for `Modelable` subclasses or classes carrying union
+        fields, so unrelated callables are left untouched.
         """
         symbol = self.lookup_fully_qualified(fullname)
-        if symbol is not None and isinstance(symbol.node, TypeInfo) and symbol.node.has_base(MODELABLE_FULLNAME):
-            return _constructor_sig_hook
+        if symbol is None or not isinstance(symbol.node, TypeInfo):
+            return None
+        if symbol.node.has_base(MODELABLE_FULLNAME) or self._union_fields_of(symbol.node):
+            return self._constructor_sig_hook
         return None
+
+    def _record_union_field(self, ctx: ClassDefContext) -> bool:
+        """Record that `@Base.extends_union('attr')` makes `attr` a discriminated union.
+
+        The field keeps its declared type; the union is resolved lazily at use
+        (read site and constructor) once every subtype is known. The mapping is
+        stored on the container's own (persisted) metadata plus the same-run
+        registry.
+        """
+        reason = ctx.reason
+        if not isinstance(reason, CallExpr):
+            return False
+        callee = reason.callee
+        if not isinstance(callee, MemberExpr) or callee.name != _EXTENDS_UNION:
+            return True
+        base = callee.expr
+        if not (isinstance(base, RefExpr) and isinstance(base.node, TypeInfo)):
+            return False
+        if not base.node.has_base(MODELABLE_FULLNAME):
+            return True
+        attr_name: str | None = None
+        for name, arg in zip(reason.arg_names, reason.args, strict=True):
+            if isinstance(arg, StrExpr) and name in (None, 'attr_name'):
+                attr_name = arg.value
+                break
+        if attr_name is None:
+            return True
+        container = ctx.cls.info
+        container.metadata.setdefault(_METADATA_KEY, {}).setdefault(_UNION_FIELDS, {})[attr_name] = base.node.fullname
+        self._union_fields[f'{container.fullname}.{attr_name}'] = base.node.fullname
+        return True
+
+    def _subtypes_of(self, base_fullname: str) -> list[str]:
+        """Direct subclasses of an extensible base: registry + module-graph scan.
+
+        The semantic-analysis registry (`_union_subtypes`) covers classes
+        analysed this run; the module-graph scan covers classes loaded from
+        cache on incremental runs (where semanal, hence the registry, is
+        skipped). Merged, de-duplicated by fullname, registry order first.
+
+        Deliberately not memoised: an early call (e.g. during incremental SCC
+        processing, before the registry is complete) would otherwise cache an
+        incomplete result. Only invoked for genuine union-field accesses.
+        """
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for name in self._union_subtypes.get(base_fullname, []):
+            if name not in seen:
+                seen.add(name)
+                ordered.append(name)
+        for module in (self._modules or {}).values():
+            for symbol in module.names.values():
+                node = symbol.node
+                if (
+                    isinstance(node, TypeInfo)
+                    and node.fullname not in seen
+                    and any(base.type.fullname == base_fullname for base in node.bases)
+                ):
+                    seen.add(node.fullname)
+                    ordered.append(node.fullname)
+        return ordered
+
+    def _union_field_base(self, attr_fullname: str) -> str | None:
+        """Return the extensible base for a `Container.attr` fullname, or None."""
+        base = self._union_fields.get(attr_fullname)
+        if base is not None:
+            return base
+        cls_fullname, _, attr = attr_fullname.rpartition('.')
+        if not attr:
+            return None
+        symbol = self.lookup_fully_qualified(cls_fullname)
+        if symbol is None or not isinstance(symbol.node, TypeInfo):
+            return None
+        fields: dict[str, str] = symbol.node.metadata.get(_METADATA_KEY, {}).get(_UNION_FIELDS, {})
+        return fields.get(attr)
+
+    def _union_fields_of(self, info: TypeInfo) -> dict[str, str]:
+        """Return the `extends_union` fields declared on `info`: {attr: base_fullname}."""
+        fields: dict[str, str] = dict(info.metadata.get(_METADATA_KEY, {}).get(_UNION_FIELDS, {}))
+        prefix = f'{info.fullname}.'
+        for key, base in self._union_fields.items():
+            if key.startswith(prefix):
+                fields[key[len(prefix):]] = base
+        return fields
+
+    def _build_union(self, base_fullname: str) -> Type | None:
+        """Build the discriminated union of a base's subtypes, or None if none resolve."""
+        instances: list[Instance] = []
+        for subtype in self._subtypes_of(base_fullname):
+            symbol = self.lookup_fully_qualified(subtype)
+            if symbol is not None and isinstance(symbol.node, TypeInfo):
+                instances.append(Instance(symbol.node, []))
+        if not instances:
+            return None
+        return UnionType.make_union(instances)
+
+    def _constructor_sig_hook(self, ctx: FunctionSigContext) -> FunctionLike:
+        """Narrow `extends_union` fields and append `as_attribute` fields on a constructor."""
+        signature = ctx.default_signature
+        if not isinstance(signature, CallableType):
+            return signature
+        ret_type = get_proper_type(signature.ret_type)
+        if not isinstance(ret_type, Instance):
+            return signature
+        info = ret_type.type
+
+        arg_types = list(signature.arg_types)
+        arg_kinds = list(signature.arg_kinds)
+        arg_names = list(signature.arg_names)
+
+        # extends_union: narrow the declared field's keyword to the union.
+        for attr, base_fullname in self._union_fields_of(info).items():
+            if attr not in arg_names:
+                continue
+            union = self._build_union(base_fullname)
+            if union is not None:
+                arg_types[arg_names.index(attr)] = union
+
+        # as_attribute: append injected fields, unless the constructor already
+        # accepts arbitrary keywords (inserting named args after `**kwargs` would
+        # be ill-formed).
+        if ARG_STAR2 not in arg_kinds:
+            existing = set(arg_names)
+            for name, (typ, required) in _injected_fields(info).items():
+                if name in existing:
+                    continue
+                arg_types.append(typ)
+                arg_kinds.append(ARG_NAMED if required else ARG_NAMED_OPT)
+                arg_names.append(name)
+
+        return signature.copy_modified(arg_types=arg_types, arg_kinds=arg_kinds, arg_names=arg_names)
 
 
 def _record_injected(info: TypeInfo, attr_name: str, *, required: bool) -> None:
@@ -179,34 +367,6 @@ def _as_attribute_hook(ctx: ClassDefContext) -> bool:
     add_attribute_to_class(ctx.api, target.defn, attr_name, attr_type)
     _record_injected(target, attr_name, required=required)
     return True
-
-
-def _constructor_sig_hook(ctx: FunctionSigContext) -> FunctionLike:
-    """Append injected fields as accepted keyword arguments to a constructor."""
-    signature = ctx.default_signature
-    if not isinstance(signature, CallableType):
-        return signature
-    # A `**kwargs`-accepting constructor already takes any keyword; nothing to do
-    # (and inserting named args after `**kwargs` would be ill-formed).
-    if ARG_STAR2 in signature.arg_kinds:
-        return signature
-    ret_type = get_proper_type(signature.ret_type)
-    if not isinstance(ret_type, Instance):
-        return signature
-
-    existing = set(signature.arg_names)
-    extra = {name: field for name, field in _injected_fields(ret_type.type).items() if name not in existing}
-    if not extra:
-        return signature
-
-    arg_types = list(signature.arg_types)
-    arg_kinds = list(signature.arg_kinds)
-    arg_names = list(signature.arg_names)
-    for name, (typ, required) in extra.items():
-        arg_types.append(typ)
-        arg_kinds.append(ARG_NAMED if required else ARG_NAMED_OPT)
-        arg_names.append(name)
-    return signature.copy_modified(arg_types=arg_types, arg_kinds=arg_kinds, arg_names=arg_names)
 
 
 def plugin(version: str) -> type[Plugin]:
