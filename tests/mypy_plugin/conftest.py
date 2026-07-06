@@ -5,6 +5,8 @@ Each test provides a snippet of code that exercises `pydantic_modelable`, runs
 plugin lets a single snippet both *reproduce* an error (plugin off) and *verify
 the fix* (plugin on).
 """
+import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,9 @@ from mypy import api
 # hook mypy's own module finder does not follow), so point mypy at its source
 # tree directly. In a normal wheel install this is unnecessary.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Multi-module fixture packages for the cross-module functional test.
+_FUNC_FIXTURES = Path(__file__).resolve().parent / 'func_fixtures'
 
 # Snippets refer to a Modelable subtype defined in the snippet itself; aenum is
 # untyped, so it is silenced to keep diagnostics focused on the plugin's domain.
@@ -48,6 +53,41 @@ class MypyResult:
 
 
 RunMypy = Callable[..., MypyResult]
+RunMypyPackage = Callable[..., MypyResult]
+
+
+@pytest.fixture
+def run_mypy_package(tmp_path: Path) -> RunMypyPackage:
+    """Return a callable running `mypy --strict` over cross-module fixture files.
+
+    Named modules are copied out of `func_fixtures/` into an isolated directory
+    that belongs to no package, which is placed on `mypy_path` so the fixtures
+    import one another by module name (as separately-installed packages would)
+    without the surrounding `tests` package shadowing their module paths.
+    """
+
+    def _run(*modules: str, plugin: bool = True) -> MypyResult:
+        for module in modules:
+            shutil.copy(_FUNC_FIXTURES / module, tmp_path / module)
+        plugins = 'plugins = pydantic_modelable_mypy.plugin' if plugin else ''
+        search_path = os.pathsep.join((str(_REPO_ROOT), str(tmp_path)))
+        config = tmp_path / 'mypy.ini'
+        config.write_text(
+            '[mypy]\n'
+            'strict = True\n'
+            f'mypy_path = {search_path}\n'
+            f'{plugins}\n'
+            '[mypy-aenum.*]\n'
+            'ignore_missing_imports = True\n'
+        )
+        targets = [str(tmp_path / module) for module in modules]
+        stdout, _stderr, exit_status = api.run(
+            ['--config-file', str(config), '--no-incremental', *targets],
+        )
+        errors = sum(1 for line in stdout.splitlines() if ': error:' in line)
+        return MypyResult(output=stdout, errors=errors, exit_status=exit_status)
+
+    return _run
 
 
 @pytest.fixture
