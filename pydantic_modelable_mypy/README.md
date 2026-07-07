@@ -20,3 +20,23 @@ configuration:
 [mypy]
 plugins = pydantic_modelable_mypy.plugin
 ```
+
+## What it covers
+
+- `as_attribute` — the injected field is known for reads and construction.
+- `extends_union` — the field is typed as the discriminated union of the base's
+  subtypes (reads and construction), including subtypes defined in other
+  modules, on full and incremental runs.
+- `extends_enum` — the discriminator values injected as enum members are
+  resolved by name (`Palette.red`).
+
+## Limitation (`extends_enum` member names)
+
+Enum member access on an unknown name offers no plugin hook, so injected member
+names can only be resolved from subtypes discovered during analysis. This is
+reliable on **full (non-incremental) runs** (e.g. CI with `mypy` fresh, or
+`--no-incremental`). On **incremental / daemon** runs, subtypes served from
+cache are not re-analysed, so member-name access (`Palette.red`) may report an
+unknown attribute until a clean run. Everything else `ModelableStrEnum` provides
+— iteration, membership, construction, `.value` — works in all modes, as does
+all of `as_attribute` and `extends_union`.

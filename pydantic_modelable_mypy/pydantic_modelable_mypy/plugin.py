@@ -26,9 +26,25 @@ from mypy.nodes import (
     Var,
 )
 from mypy.options import Options
-from mypy.plugin import AttributeContext, ClassDefContext, FunctionSigContext, Plugin
+from mypy.plugin import (
+    AttributeContext,
+    ClassDefContext,
+    FunctionSigContext,
+    Plugin,
+    SemanticAnalyzerPluginInterface,
+)
 from mypy.plugins.common import add_attribute_to_class
-from mypy.types import CallableType, FunctionLike, Instance, NoneType, ProperType, Type, UnionType, get_proper_type
+from mypy.types import (
+    CallableType,
+    FunctionLike,
+    Instance,
+    LiteralType,
+    NoneType,
+    ProperType,
+    Type,
+    UnionType,
+    get_proper_type,
+)
 
 # The base every extensible model derives from; used to filter our decorators
 # apart from any unrelated method that happens to be named `as_attribute`.
@@ -36,6 +52,7 @@ MODELABLE_FULLNAME = 'pydantic_modelable.model.Modelable'
 
 _AS_ATTRIBUTE = 'as_attribute'
 _EXTENDS_UNION = 'extends_union'
+_EXTENDS_ENUM = 'extends_enum'
 
 # Parameters of `Modelable.as_attribute`, after the bound `cls`, in order.
 _AS_ATTRIBUTE_PARAMS = ('attr_name', 'optional', 'default_factory')
@@ -47,6 +64,8 @@ _METADATA_KEY = 'pydantic_modelable'
 _INJECTED_ATTRS = 'injected_attrs'
 # On a container `TypeInfo`: {attr_name: base_fullname} for `extends_union`.
 _UNION_FIELDS = 'union_fields'
+# On an extensible base `TypeInfo`: the discriminator field name.
+_DISCRIMINATOR = 'discriminator'
 
 
 class ModelablePlugin(Plugin):
@@ -64,6 +83,14 @@ class ModelablePlugin(Plugin):
         # metadata: covers containers decorated this run before their cache
         # exists. Keyed by 'Container.attr' fullname -> base fullname.
         self._union_fields: dict[str, str] = {}
+        # Extensible base fullname -> its discriminator field name, captured
+        # from the base's `discriminator=` class keyword.
+        self._discriminators: dict[str, str] = {}
+        # Extensible base fullname -> the extensible enum TypeInfos registered
+        # onto it. Subtypes analysed after the enum push their discriminator
+        # values into these (the enum's module is analysed before its subtypes',
+        # so the enum TypeInfo already exists when a subtype is seen).
+        self._enum_bases: dict[str, list[TypeInfo]] = {}
 
     def get_class_decorator_hook_2(self, fullname: str) -> Callable[[ClassDefContext], bool] | None:
         """Dispatch class-decorator analysis for the registration decorators.
@@ -77,28 +104,44 @@ class ModelablePlugin(Plugin):
             return _as_attribute_hook
         if name == _EXTENDS_UNION:
             return self._record_union_field
+        if name == _EXTENDS_ENUM:
+            return self._extend_enum_hook
         return None
 
     def get_base_class_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
         """Record subclasses of an extensible `Modelable` base during analysis.
 
-        mypy keys this on the base's fullname. When the base is a proper
-        `Modelable` subclass, the class being defined is one of its union
-        alternatives; recording it here is what makes full runs reliable, since
-        the check-time module scan cannot see trees mypy has freed.
+        mypy keys this on the base's fullname, which may be a re-export path
+        (e.g. `pydantic_modelable.Modelable`), so we resolve it to a `TypeInfo`
+        and compare its canonical fullname. When the base is `Modelable` itself,
+        the class being defined is an extensible base and we capture its
+        discriminator for `extends_enum`. When the base is a proper `Modelable`
+        subclass, the class is one of its union alternatives; recording it here
+        keeps full runs reliable, since the check-time module scan cannot see
+        trees mypy has freed.
         """
-        if fullname == MODELABLE_FULLNAME:
-            return None
         symbol = self.lookup_fully_qualified(fullname)
-        if symbol is None or not isinstance(symbol.node, TypeInfo) or not symbol.node.has_base(MODELABLE_FULLNAME):
+        if symbol is None or not isinstance(symbol.node, TypeInfo):
             return None
-        base_fullname = fullname
+        base_info = symbol.node
+        if base_info.fullname == MODELABLE_FULLNAME:
+            return self._capture_discriminator
+        if not base_info.has_base(MODELABLE_FULLNAME):
+            return None
+        base_fullname = base_info.fullname
 
         def _register(ctx: ClassDefContext) -> None:
             subtypes = self._union_subtypes.setdefault(base_fullname, [])
             subtype = ctx.cls.info.fullname
             if subtype not in subtypes:
                 subtypes.append(subtype)
+            # Push this subtype's discriminator values into any enum already
+            # registered for the base (covers subtypes — incl. cross-module —
+            # defined after the enum).
+            discriminator = self._discriminator_of(base_fullname)
+            if discriminator is not None:
+                for enum_info in self._enum_bases.get(base_fullname, []):
+                    self._add_enum_members(ctx.api, enum_info, ctx.cls.info, discriminator)
 
         return _register
 
@@ -165,6 +208,73 @@ class ModelablePlugin(Plugin):
         container.metadata.setdefault(_METADATA_KEY, {}).setdefault(_UNION_FIELDS, {})[attr_name] = base.node.fullname
         self._union_fields[f'{container.fullname}.{attr_name}'] = base.node.fullname
         return True
+
+    def _capture_discriminator(self, ctx: ClassDefContext) -> None:
+        """Record the `discriminator=` keyword of an extensible base being defined."""
+        discriminator = ctx.cls.keywords.get(_DISCRIMINATOR)
+        if not isinstance(discriminator, StrExpr):
+            return
+        base = ctx.cls.info
+        self._discriminators[base.fullname] = discriminator.value
+        base.metadata.setdefault(_METADATA_KEY, {})[_DISCRIMINATOR] = discriminator.value
+
+    def _discriminator_of(self, base_fullname: str) -> str | None:
+        """Return the discriminator field name of an extensible base, or None."""
+        cached = self._discriminators.get(base_fullname)
+        if cached is not None:
+            return cached
+        symbol = self.lookup_fully_qualified(base_fullname)
+        if symbol is None or not isinstance(symbol.node, TypeInfo):
+            return None
+        value: str | None = symbol.node.metadata.get(_METADATA_KEY, {}).get(_DISCRIMINATOR)
+        return value
+
+    def _extend_enum_hook(self, ctx: ClassDefContext) -> bool:
+        """Inject the discriminator literals of a base's subtypes as enum members.
+
+        `@Base.extends_enum` adds, at runtime, one member per discriminator value
+        of every `Base` subtype. We mirror that on the decorated enum's TypeInfo
+        so member access (`Species.one`) resolves.
+        """
+        reason = ctx.reason
+        if not isinstance(reason, MemberExpr) or reason.name != _EXTENDS_ENUM:
+            return True
+        base_expr = reason.expr
+        if not (isinstance(base_expr, RefExpr) and isinstance(base_expr.node, TypeInfo)):
+            return False
+        base = base_expr.node
+        if not base.has_base(MODELABLE_FULLNAME):
+            return True
+        discriminator = self._discriminator_of(base.fullname)
+        if discriminator is None:
+            return True
+        enum_info = ctx.cls.info
+        # Register so subtypes analysed later push their values into this enum.
+        enums = self._enum_bases.setdefault(base.fullname, [])
+        if enum_info not in enums:
+            enums.append(enum_info)
+        # Inject members for subtypes already known (defined before the enum, or
+        # loaded from cache on an incremental run).
+        for subtype_fullname in self._subtypes_of(base.fullname):
+            symbol = self.lookup_fully_qualified(subtype_fullname)
+            if symbol is not None and isinstance(symbol.node, TypeInfo):
+                self._add_enum_members(ctx.api, enum_info, symbol.node, discriminator)
+        return True
+
+    def _add_enum_members(
+        self,
+        api: SemanticAnalyzerPluginInterface,
+        enum_info: TypeInfo,
+        subtype: TypeInfo,
+        discriminator: str,
+    ) -> None:
+        """Add `subtype`'s discriminator literal(s) as members of `enum_info`."""
+        field = subtype.get(discriminator)
+        if field is None or not isinstance(field.node, Var) or field.node.type is None:
+            return
+        for value in _literal_str_values(field.node.type):
+            if value not in enum_info.names:
+                add_attribute_to_class(api, enum_info.defn, value, Instance(enum_info, []))
 
     def _subtypes_of(self, base_fullname: str) -> list[str]:
         """Direct subclasses of an extensible base: registry + module-graph scan.
@@ -320,6 +430,23 @@ def _bind_arguments(reason: CallExpr) -> dict[str, Expression]:
         else:
             bound[name] = arg
     return bound
+
+
+def _literal_str_values(typ: Type) -> list[str]:
+    """Extract the string values of a `Literal[...]` type (a union yields several)."""
+    proper = get_proper_type(typ)
+    if isinstance(proper, UnionType):
+        values: list[str] = []
+        for item in proper.items:
+            values.extend(_literal_str_values(item))
+        return values
+    if isinstance(proper, LiteralType) and isinstance(proper.value, str):
+        return [proper.value]
+    # A field declared as a value (`mtype: Literal['one'] = 'one'`) may present
+    # as its fallback instance carrying the literal in `last_known_value`.
+    if isinstance(proper, Instance) and proper.last_known_value is not None:
+        return _literal_str_values(proper.last_known_value)
+    return []
 
 
 def _is_true(expr: object) -> bool:
