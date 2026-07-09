@@ -33,13 +33,17 @@ plugins = pydantic_modelable_mypy.plugin
   (`@Fwd.as_attribute(...)`) are resolved through the `forwards_to` chain
   (including chained forwarders) to the target `Modelable` and handled as above.
 
-## Limitation (`extends_enum` member names)
+## Limitation (incremental / daemon runs)
 
-Enum member access on an unknown name offers no plugin hook, so injected member
-names can only be resolved from subtypes discovered during analysis. This is
-reliable on **full (non-incremental) runs** (e.g. CI with `mypy` fresh, or
-`--no-incremental`). On **incremental / daemon** runs, subtypes served from
-cache are not re-analysed, so member-name access (`Palette.red`) may report an
-unknown attribute until a clean run. Everything else `ModelableStrEnum` provides
-— iteration, membership, construction, `.value` — works in all modes, as does
-all of `as_attribute` and `extends_union`.
+`as_attribute` fields and `extends_enum` enum values are *created* on a model
+that does not declare them, so mypy can only resolve them once the extension's
+injection has run. That happens on **full runs** (e.g. CI, or
+`--no-incremental`) but not on **incremental / daemon** runs, where the
+extension modules are served from cache and not re-analysed — attribute /
+member access then reports an unknown attribute until a clean run. (A pydantic
+model exposes no `__getattr__` to type-checkers, by design, so there is no hook
+to resolve such a member lazily.)
+
+`extends_union` is unaffected — it retypes a field the model already declares —
+as is `ModelableStrEnum`'s enum behaviour (iteration, membership, construction,
+`.value`), which all work in every mode.
