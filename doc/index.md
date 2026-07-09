@@ -34,13 +34,14 @@ embedded into your base model by the `pydantic_modelable.Modelable` class:
  - `as_attribute(attr_name: str, optional: bool, default_factory: Callable[[], BaseModel])`
 
 
-## Limitations
+## Static typing
 
-As pydantic-modelable relies on altering the pydantic models at runtime, the
-type-checking tools are usually not able to understand that the model was
-extended and its type signature was changed. This, sadly, often leads to an
-extensive use of `#type: ignore` directives in the code relating to the use
-of the extended models.
+Because the models are altered at runtime, a plain type-checker cannot, on its
+own, see the fields, union members or enum values an extension adds.
+`pydantic-modelable` closes most of that gap — an identity-preserving decorator
+API and `ModelableStrEnum` for any checker, plus the `pydantic-modelable-mypy`
+plugin for mypy. See [Static typing](typing.md) for the details and the
+remaining limitations.
 
 
 ## Usages of `pydantic_modelable`
@@ -49,3 +50,4 @@ The following documents will describe the various uses of `pydantic_modelable`:
 
  - [Discriminated unions](examples/discriminated_union.md)
  - [Extensible models](examples/extensible_model.md)
+ - [Static typing](typing.md)

@@ -10,6 +10,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Static typing: typing.md
   - How-Tos:
     - Extending models: examples/extensible_model.md
     - Extending Discriminated unions: examples/discriminated_union.md

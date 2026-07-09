@@ -13,6 +13,10 @@
 
 ### Features:
 
+ - `pydantic-modelable-mypy`, a companion (separately-installed) mypy plugin
+   that teaches the type-checker about the runtime extensions: `as_attribute`
+   fields, `extends_union` discriminated unions, `extends_enum` enum members,
+   and the same through a `ModelableForwarder`. See the Static typing guide.
  - `pydantic_modelable.ModelableStrEnum`, a base class for extensible string
    enums. It is an `aenum`-based str Enum at runtime (extended in place by
    `extends_enum`) but is seen as a standard `enum.Enum` by type-checkers, so

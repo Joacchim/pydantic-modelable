@@ -33,10 +33,34 @@ embedded into your base model by the `pydantic_modelable.Modelable` class:
  - `as_attribute(attr_name: str, optional: bool, default_factory: Callable[[], BaseModel])`
 
 
-## Limitations
+## Static typing
 
-As pydantic-modelable relies on altering the pydantic models at runtime, the
-type-checking tools are usually not able to understand that the model was
-extended and its type signature was changed. This, sadly, often leads to an
-extensive use of `#type: ignore` directives in the code relating to the use
-of the extended models.
+Because the models are altered at runtime, a plain type-checker cannot, on its
+own, see the fields, union members or enum values an extension adds.
+`pydantic-modelable` closes most of that gap:
+
+ - **Any type-checker.** The registration decorators are identity-preserving —
+   decorating a class returns that same class, so its type is never erased. And
+   `pydantic_modelable.ModelableStrEnum` is a typed base for extensible string
+   enums: inherit it instead of spelling out the `aenum` bases and subclasses
+   are understood as ordinary enums, with no `# type: ignore`.
+ - **mypy.** Install the companion `pydantic-modelable-mypy` distribution and
+   enable its plugin:
+
+   ```ini
+   [mypy]
+   plugins = pydantic_modelable_mypy.plugin
+   ```
+
+   It teaches mypy about the runtime extensions — `as_attribute` fields,
+   `extends_union` discriminated unions, `extends_enum` enum members — including
+   when they are registered through a `ModelableForwarder`.
+
+### Remaining limitations
+
+ - The plugin is mypy-specific; other checkers (e.g. pyright) see only what the
+   "any type-checker" support above provides.
+ - `extends_enum` member-name access (`MyEnum.some_value`) resolves on full
+   runs but not on incremental / daemon runs, where a clean run is needed.
+   Enum iteration, membership and construction, and all of `as_attribute` /
+   `extends_union`, work in every mode.
