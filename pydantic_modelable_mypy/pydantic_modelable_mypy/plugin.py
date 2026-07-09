@@ -49,6 +49,9 @@ from mypy.types import (
 # The base every extensible model derives from; used to filter our decorators
 # apart from any unrelated method that happens to be named `as_attribute`.
 MODELABLE_FULLNAME = 'pydantic_modelable.model.Modelable'
+# The registration proxy: decorators invoked on a subclass are delegated to its
+# `forwards_to` target (a `Modelable` or a further forwarder).
+FORWARDER_FULLNAME = 'pydantic_modelable.forwarder.ModelableForwarder'
 
 _AS_ATTRIBUTE = 'as_attribute'
 _EXTENDS_UNION = 'extends_union'
@@ -66,6 +69,8 @@ _INJECTED_ATTRS = 'injected_attrs'
 _UNION_FIELDS = 'union_fields'
 # On an extensible base `TypeInfo`: the discriminator field name.
 _DISCRIMINATOR = 'discriminator'
+# On a `ModelableForwarder` `TypeInfo`: the `forwards_to` target fullname.
+_FORWARDS_TO = 'forwards_to'
 
 
 class ModelablePlugin(Plugin):
@@ -91,17 +96,22 @@ class ModelablePlugin(Plugin):
         # values into these (the enum's module is analysed before its subtypes',
         # so the enum TypeInfo already exists when a subtype is seen).
         self._enum_bases: dict[str, list[TypeInfo]] = {}
+        # ModelableForwarder subclass fullname -> its `forwards_to` target
+        # fullname (a Modelable or a further forwarder).
+        self._forwards_to: dict[str, str] = {}
 
     def get_class_decorator_hook_2(self, fullname: str) -> Callable[[ClassDefContext], bool] | None:
         """Dispatch class-decorator analysis for the registration decorators.
 
         mypy keys this on the decorator's fullname. The decorators are
-        classmethods inherited from `Modelable`, so `@Shelter.as_attribute(...)`
-        resolves to `Modelable.as_attribute` regardless of the subclass.
+        classmethods inherited from `Modelable` (or `ModelableForwarder`, which
+        delegates), so the trailing component identifies them regardless of the
+        receiving subclass; the receiver is resolved (through any forwarder
+        chain) to the target `Modelable` at handling time.
         """
         name = fullname.rsplit('.', 1)[-1]
         if name == _AS_ATTRIBUTE:
-            return _as_attribute_hook
+            return self._as_attribute_hook
         if name == _EXTENDS_UNION:
             return self._record_union_field
         if name == _EXTENDS_ENUM:
@@ -126,6 +136,8 @@ class ModelablePlugin(Plugin):
         base_info = symbol.node
         if base_info.fullname == MODELABLE_FULLNAME:
             return self._capture_discriminator
+        if base_info.fullname == FORWARDER_FULLNAME:
+            return self._capture_forwards_to
         if not base_info.has_base(MODELABLE_FULLNAME):
             return None
         base_fullname = base_info.fullname
@@ -187,16 +199,13 @@ class ModelablePlugin(Plugin):
         registry.
         """
         reason = ctx.reason
-        if not isinstance(reason, CallExpr):
+        receiver = _receiver_type(reason, _EXTENDS_UNION)
+        if receiver is None:
             return False
-        callee = reason.callee
-        if not isinstance(callee, MemberExpr) or callee.name != _EXTENDS_UNION:
+        base = self._resolve_modelable(receiver)
+        if base is None:
             return True
-        base = callee.expr
-        if not (isinstance(base, RefExpr) and isinstance(base.node, TypeInfo)):
-            return False
-        if not base.node.has_base(MODELABLE_FULLNAME):
-            return True
+        assert isinstance(reason, CallExpr)
         attr_name: str | None = None
         for name, arg in zip(reason.arg_names, reason.args, strict=True):
             if isinstance(arg, StrExpr) and name in (None, 'attr_name'):
@@ -205,8 +214,45 @@ class ModelablePlugin(Plugin):
         if attr_name is None:
             return True
         container = ctx.cls.info
-        container.metadata.setdefault(_METADATA_KEY, {}).setdefault(_UNION_FIELDS, {})[attr_name] = base.node.fullname
-        self._union_fields[f'{container.fullname}.{attr_name}'] = base.node.fullname
+        container.metadata.setdefault(_METADATA_KEY, {}).setdefault(_UNION_FIELDS, {})[attr_name] = base.fullname
+        self._union_fields[f'{container.fullname}.{attr_name}'] = base.fullname
+        return True
+
+    def _as_attribute_hook(self, ctx: ClassDefContext) -> bool:
+        """Inject the field `as_attribute` adds onto its target model.
+
+        Returns whether analysis is complete: if the receiver is not resolvable
+        yet, we return `False` so mypy re-runs us on a later pass. The receiver
+        may be a `ModelableForwarder`, in which case it is resolved through its
+        `forwards_to` chain to the target `Modelable`.
+        """
+        receiver = _receiver_type(ctx.reason, _AS_ATTRIBUTE)
+        if receiver is None:
+            return False
+        target = self._resolve_modelable(receiver)
+        if target is None:
+            return True
+
+        reason = ctx.reason
+        assert isinstance(reason, CallExpr)
+        bound = _bind_arguments(reason)
+        attr_name_expr = bound.get('attr_name')
+        if not isinstance(attr_name_expr, StrExpr):
+            return True
+        attr_name = attr_name_expr.value
+
+        # `optional=True` widens the field type; it does not supply a default. A
+        # field is required at construction unless a `default_factory` is given.
+        optional = _is_true(bound.get('optional'))
+        factory = bound.get('default_factory')
+        required = factory is None or _is_none(factory)
+
+        attr_type: ProperType = Instance(ctx.cls.info, [])
+        if optional:
+            attr_type = UnionType([attr_type, NoneType()])
+
+        add_attribute_to_class(ctx.api, target.defn, attr_name, attr_type)
+        _record_injected(target, attr_name, required=required)
         return True
 
     def _capture_discriminator(self, ctx: ClassDefContext) -> None:
@@ -217,6 +263,43 @@ class ModelablePlugin(Plugin):
         base = ctx.cls.info
         self._discriminators[base.fullname] = discriminator.value
         base.metadata.setdefault(_METADATA_KEY, {})[_DISCRIMINATOR] = discriminator.value
+
+    def _capture_forwards_to(self, ctx: ClassDefContext) -> None:
+        """Record the `forwards_to=` target of a `ModelableForwarder` being defined."""
+        target = ctx.cls.keywords.get(_FORWARDS_TO)
+        if not isinstance(target, RefExpr) or not isinstance(target.node, TypeInfo):
+            return
+        forwarder = ctx.cls.info
+        self._forwards_to[forwarder.fullname] = target.node.fullname
+        forwarder.metadata.setdefault(_METADATA_KEY, {})[_FORWARDS_TO] = target.node.fullname
+
+    def _forwards_to_of(self, forwarder_fullname: str) -> str | None:
+        """Return a forwarder's `forwards_to` target fullname, or None."""
+        cached = self._forwards_to.get(forwarder_fullname)
+        if cached is not None:
+            return cached
+        symbol = self.lookup_fully_qualified(forwarder_fullname)
+        if symbol is None or not isinstance(symbol.node, TypeInfo):
+            return None
+        value: str | None = symbol.node.metadata.get(_METADATA_KEY, {}).get(_FORWARDS_TO)
+        return value
+
+    def _resolve_modelable(self, info: TypeInfo, depth: int = 0) -> TypeInfo | None:
+        """Resolve a decorator receiver to its target `Modelable`.
+
+        A `Modelable` subclass resolves to itself; a `ModelableForwarder` is
+        followed through its `forwards_to` chain (bounded, to guard cycles) to
+        the target `Modelable`. Anything else yields None.
+        """
+        if info.has_base(MODELABLE_FULLNAME):
+            return info
+        if depth < 16 and info.has_base(FORWARDER_FULLNAME):
+            target = self._forwards_to_of(info.fullname)
+            if target is not None:
+                symbol = self.lookup_fully_qualified(target)
+                if symbol is not None and isinstance(symbol.node, TypeInfo):
+                    return self._resolve_modelable(symbol.node, depth + 1)
+        return None
 
     def _discriminator_of(self, base_fullname: str) -> str | None:
         """Return the discriminator field name of an extensible base, or None."""
@@ -236,14 +319,11 @@ class ModelablePlugin(Plugin):
         of every `Base` subtype. We mirror that on the decorated enum's TypeInfo
         so member access (`Species.one`) resolves.
         """
-        reason = ctx.reason
-        if not isinstance(reason, MemberExpr) or reason.name != _EXTENDS_ENUM:
-            return True
-        base_expr = reason.expr
-        if not (isinstance(base_expr, RefExpr) and isinstance(base_expr.node, TypeInfo)):
+        receiver = _receiver_type(ctx.reason, _EXTENDS_ENUM)
+        if receiver is None:
             return False
-        base = base_expr.node
-        if not base.has_base(MODELABLE_FULLNAME):
+        base = self._resolve_modelable(receiver)
+        if base is None:
             return True
         discriminator = self._discriminator_of(base.fullname)
         if discriminator is None:
@@ -396,21 +476,19 @@ def _injected_fields(info: TypeInfo) -> dict[str, tuple[Type, bool]]:
     return fields
 
 
-def _resolve_target(ctx: ClassDefContext) -> TypeInfo | None:
-    """Resolve the `Modelable` subclass a decorator is registering onto.
+def _receiver_type(reason: Expression, method: str) -> TypeInfo | None:
+    """Return the class a `@Receiver.method(...)` / `@Receiver.method` decorator is bound to.
 
-    For `@Shelter.as_attribute('welcome_desk')`, that is `Shelter` — the object
-    the decorator method is bound to, not the decorated class.
+    That is the object the decorator method is invoked on (a `Modelable` or a
+    `ModelableForwarder`), not the decorated class. Handles both the call form
+    (`as_attribute`, `extends_union`) and the bare form (`extends_enum`).
     """
-    reason = ctx.reason
-    if not isinstance(reason, CallExpr):
+    callee = reason.callee if isinstance(reason, CallExpr) else reason
+    if not isinstance(callee, MemberExpr) or callee.name != method:
         return None
-    callee = reason.callee
-    if not isinstance(callee, MemberExpr) or callee.name != _AS_ATTRIBUTE:
-        return None
-    target = callee.expr
-    if isinstance(target, RefExpr) and isinstance(target.node, TypeInfo):
-        return target.node
+    receiver = callee.expr
+    if isinstance(receiver, RefExpr) and isinstance(receiver.node, TypeInfo):
+        return receiver.node
     return None
 
 
@@ -457,43 +535,6 @@ def _is_true(expr: object) -> bool:
 def _is_none(expr: object) -> bool:
     """Whether a call argument is the literal `None`."""
     return isinstance(expr, NameExpr) and expr.fullname == 'builtins.None'
-
-
-def _as_attribute_hook(ctx: ClassDefContext) -> bool:
-    """Inject the field `Modelable.as_attribute` adds onto its target model.
-
-    Returns whether analysis is complete: if the target model is not resolvable
-    yet, we return `False` so mypy re-runs us on a later pass.
-    """
-    target = _resolve_target(ctx)
-    if target is None:
-        return False
-    # Only act on our own decorator; a same-named method elsewhere is not ours.
-    if not target.has_base(MODELABLE_FULLNAME):
-        return True
-
-    reason = ctx.reason
-    assert isinstance(reason, CallExpr)
-
-    bound = _bind_arguments(reason)
-    attr_name_expr = bound.get('attr_name')
-    if not isinstance(attr_name_expr, StrExpr):
-        return True
-    attr_name = attr_name_expr.value
-
-    # `optional=True` widens the field type; it does not supply a default. A
-    # field is required at construction unless a `default_factory` is given.
-    optional = _is_true(bound.get('optional'))
-    factory = bound.get('default_factory')
-    required = factory is None or _is_none(factory)
-
-    attr_type: ProperType = Instance(ctx.cls.info, [])
-    if optional:
-        attr_type = UnionType([attr_type, NoneType()])
-
-    add_attribute_to_class(ctx.api, target.defn, attr_name, attr_type)
-    _record_injected(target, attr_name, required=required)
-    return True
 
 
 def plugin(version: str) -> type[Plugin]:

@@ -29,6 +29,9 @@ plugins = pydantic_modelable_mypy.plugin
   modules, on full and incremental runs.
 - `extends_enum` — the discriminator values injected as enum members are
   resolved by name (`Palette.red`).
+- `ModelableForwarder` — decorators applied through a forwarder
+  (`@Fwd.as_attribute(...)`) are resolved through the `forwards_to` chain
+  (including chained forwarders) to the target `Modelable` and handled as above.
 
 ## Limitation (`extends_enum` member names)
 
