@@ -1,0 +1,54 @@
+[build-system]
+requires = ['setuptools', 'setuptools_scm']
+build-backend = 'setuptools.build_meta'
+
+[tool.setuptools_scm]
+# The git repository (and its tags) live one level up: this subproject shares
+# the parent's version so the plugin always tracks the runtime library it
+# supports.
+root = '..'
+
+[tool.setuptools.packages.find]
+include = ['pydantic_modelable_mypy*']
+
+[project]
+name = 'pydantic-modelable-mypy'
+description = 'A mypy plugin teaching the type-checker about pydantic-modelable runtime model extensions'
+authors = [
+    {name = 'David Pineau', email = 'dav.pineau@gmail.com'},
+]
+license = 'BSD-3-Clause'
+license-files = ['LICENSE']
+readme = 'README.md'
+classifiers = [
+    'Development Status :: 3 - Alpha',
+    'Programming Language :: Python',
+    'Programming Language :: Python :: Implementation :: CPython',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
+    'Programming Language :: Python :: 3.14',
+    'Intended Audience :: Developers',
+    'Operating System :: OS Independent',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Framework :: Pydantic :: 2',
+    'Typing :: Typed',
+]
+requires-python = '>=3.10'
+dependencies = [
+    "pydantic-modelable",
+    "mypy>=1.11",
+]
+dynamic = ['version']
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[project.urls]
+Homepage = 'https://joacchim.github.io/pydantic-modelable/'
+Source = 'https://github.com/Joacchim/pydantic-modelable'

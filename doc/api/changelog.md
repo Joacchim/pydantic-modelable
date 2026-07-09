@@ -2,8 +2,26 @@
 
 ## In development:
 
+### Improvements:
+
+ - The registration decorators (`as_attribute`, `extends_union`,
+   `extends_enum`, `rebuilds_model`, on both `Modelable` and
+   `ModelableForwarder`) are now identity-preserving: the decorated class keeps
+   its own type instead of being erased to `type[BaseModel]` /
+   `type[aenum.Enum]`, removing the need for `# type: ignore` at decoration
+   sites.
+
 ### Features:
 
+ - `pydantic-modelable-mypy`, a companion (separately-installed) mypy plugin
+   that teaches the type-checker about the runtime extensions: `as_attribute`
+   fields, `extends_union` discriminated unions, `extends_enum` enum members,
+   and the same through a `ModelableForwarder`. See the Static typing guide.
+ - `pydantic_modelable.ModelableStrEnum`, a base class for extensible string
+   enums. It is an `aenum`-based str Enum at runtime (extended in place by
+   `extends_enum`) but is seen as a standard `enum.Enum` by type-checkers, so
+   subclasses are recognised as enums without the `# type: ignore` that
+   `aenum`'s untyped base previously required under strict settings.
  - `pydantic_modelable.forwarder.ModelableForwarder`, a registration proxy that
    delegates the `Modelable` decorators (`as_attribute`, `extends_union`,
    `extends_enum`, `rebuilds_model`) to a target `Modelable`, letting a module

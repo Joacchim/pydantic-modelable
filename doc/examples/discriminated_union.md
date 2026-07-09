@@ -24,10 +24,9 @@ As such, we'll define here:
    for `Animal`
 
 ```py
-import aenum
 from typing import Literal
 
-from pydantic_modelable import Modelable, ModelableEnumMixin
+from pydantic_modelable import Modelable, ModelableStrEnum
 
 
 # Modelable requires the `discriminator` parameter to be set for its subclass init,
@@ -50,7 +49,7 @@ class ShelterRoom(BaseModel):
 
 
 @Animal.extends_enum
-class AnimalSpecies(ModelableEnumMixin, str, aenum.Enum):
+class AnimalSpecies(ModelableStrEnum):
     ...
 
 
@@ -61,8 +60,8 @@ class Shelter(BaseModel):
 | :memo: | You can specify the default-value behavior for discriminated unions using the `discriminator_default_policy` subclass constructor parameter. See the API Documentation for more details.  |
 |--------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 
-| :memo::exclamation: | Currently, only aenum-based str Enums are supported for the `extends_enum` decorator |
-|---------------------|:-------------------------------------------------------------------------------------|
+| :memo::exclamation: | Extensible enums must inherit `ModelableStrEnum` (an `aenum`-based str Enum); it is understood as a plain `enum.Enum` by type-checkers, so no `# type: ignore` is required |
+|---------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 
 ## Using the extensible type in another module or a third party
 

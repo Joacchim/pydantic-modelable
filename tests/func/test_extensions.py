@@ -3,7 +3,6 @@
 import typing
 from typing import Any, Literal
 
-import aenum
 import core
 import pytest
 from pydantic import BaseModel
@@ -35,9 +34,9 @@ def test_core_loaded_plugins() -> None:
 
 def test_extended_enum() -> None:
     """Tests that an enum is properly extended."""
-    assert len(list(typing.cast(aenum.Enum, core.AutoExtensibleEnum))) == 2
-    assert core.loader.loaded['ext1'].ExtensionOne().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
-    assert core.loader.loaded['ext2'].ExtensionTwo().mtype in typing.cast(aenum.Enum, core.AutoExtensibleEnum)
+    assert len(list(core.AutoExtensibleEnum)) == 2
+    assert core.loader.loaded['ext1'].ExtensionOne().mtype in core.AutoExtensibleEnum
+    assert core.loader.loaded['ext2'].ExtensionTwo().mtype in core.AutoExtensibleEnum
 
 
 def test_extended_union() -> None:

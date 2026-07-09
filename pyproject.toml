@@ -4,6 +4,11 @@ build-backend = 'setuptools.build_meta'
 
 [tool.setuptools_scm]
 
+[tool.setuptools.packages.find]
+# The mypy plugin lives in a sibling top-level package (`pydantic_modelable_mypy`)
+# released as its own distribution; scope this distribution to the runtime library.
+include = ['pydantic_modelable', 'pydantic_modelable.*']
+
 [project]
 name = 'pydantic-modelable'
 description = 'A set of pydantic utilities, to extend models on package load'

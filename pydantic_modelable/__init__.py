@@ -2,7 +2,7 @@
 
 from .forwarder import ModelableForwarder
 from .loader import PluginLoader
-from .mixins import ModelableEnumMixin
+from .mixins import ModelableEnumMixin, ModelableStrEnum
 from .model import DefaultDiscriminatorPolicy, Modelable
 
 __all__ = [
@@ -10,5 +10,6 @@ __all__ = [
     'Modelable',
     'ModelableEnumMixin',
     'ModelableForwarder',
+    'ModelableStrEnum',
     'PluginLoader',
 ]

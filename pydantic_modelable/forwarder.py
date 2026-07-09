@@ -1,13 +1,18 @@
 """Forwarding proxy for pydantic_modelable.Modelable registration decorators."""
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 import aenum
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from .model import Modelable
+
+# Identity-preserving TypeVars, mirroring `Modelable`'s decorators: forwarding
+# must not erase the decorated class's type on its way to the target.
+M = TypeVar('M', bound=type[BaseModel])
+E = TypeVar('E', bound=type[aenum.Enum])
 
 
 class ModelableForwarder:
@@ -63,21 +68,21 @@ class ModelableForwarder:
         attr_name: str,
         optional: bool = False,
         default_factory: Callable[[], BaseModel | None] | None = None,
-    ) -> Callable[[type[BaseModel]], type[BaseModel]]:
+    ) -> Callable[[M], M]:
         """Forward `Modelable.as_attribute` to the target."""
         return cls.__forwards_to__.as_attribute(attr_name, optional, default_factory)
 
     @classmethod
-    def extends_union(cls, attr_name: str) -> Callable[[type[BaseModel]], type[BaseModel]]:
+    def extends_union(cls, attr_name: str) -> Callable[[M], M]:
         """Forward `Modelable.extends_union` to the target."""
         return cls.__forwards_to__.extends_union(attr_name)
 
     @classmethod
-    def extends_enum(cls, decorable: type[aenum.Enum]) -> type[aenum.Enum]:
+    def extends_enum(cls, decorable: E) -> E:
         """Forward `Modelable.extends_enum` to the target."""
         return cls.__forwards_to__.extends_enum(decorable)
 
     @classmethod
-    def rebuilds_model(cls) -> Callable[[type[BaseModel]], type[BaseModel]]:
+    def rebuilds_model(cls) -> Callable[[M], M]:
         """Forward `Modelable.rebuilds_model` to the target."""
         return cls.__forwards_to__.rebuilds_model()
