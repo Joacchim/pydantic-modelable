@@ -60,7 +60,12 @@ own, see the fields, union members or enum values an extension adds.
 
  - The plugin is mypy-specific; other checkers (e.g. pyright) see only what the
    "any type-checker" support above provides.
- - `extends_enum` member-name access (`MyEnum.some_value`) resolves on full
-   runs but not on incremental / daemon runs, where a clean run is needed.
-   Enum iteration, membership and construction, and all of `as_attribute` /
-   `extends_union`, work in every mode.
+ - Members an extension *creates* on another model — `as_attribute` fields and
+   `extends_enum` enum values — resolve on full runs but not on incremental /
+   daemon runs (e.g. an editor using the mypy daemon), where the extension
+   modules come from cache and a clean run is needed. Such a member must
+   physically exist on the target for mypy to resolve it, and the cross-module
+   injection that adds it is not replayed from the cache.
+ - `extends_union` is *not* affected — it retypes a field the model already
+   declares, so it works in every mode, as does `ModelableStrEnum`'s enum
+   behaviour (iteration, membership, construction, `.value`).
