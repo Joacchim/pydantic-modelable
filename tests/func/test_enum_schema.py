@@ -2,10 +2,11 @@
 
 from typing import Annotated, Any, Literal
 
+import aenum
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from pydantic_modelable import Modelable, ModelableStrEnum
+from pydantic_modelable import Modelable, ModelableEnumMixin, ModelableStrEnum
 
 
 def _make_shapes(*kinds: Literal['circle', 'square']) -> tuple[type[BaseModel], type[ModelableStrEnum]]:
@@ -74,3 +75,39 @@ def test_enum_field_accepts_later_extensions() -> None:
     assert _validated_kind(shape_filter, 'square') is shape_kind('square')
     with pytest.raises(ValidationError):
         _validated_kind(shape_filter, 'triangle')
+
+
+def test_enum_schema_kwargs_set_the_json_schema() -> None:
+    """The schema_title and schema_description subclass parameters reach the JSON schema."""
+
+    class Kinds(ModelableStrEnum, schema_title='Shape kinds', schema_description='Kind of a shape'):
+        pass
+
+    class Holder(BaseModel):
+        kind: Kinds | None = None
+
+    schema = Holder.model_json_schema()['properties']['kind']['anyOf'][0]
+
+    assert schema['title'] == 'Shape kinds'
+    assert schema['description'] == 'Kind of a shape'
+
+
+def test_enum_schema_defaults_without_kwargs() -> None:
+    """Without subclass parameters, the schema title and description default to values derived from the class name."""
+
+    class Bare(ModelableStrEnum):
+        pass
+
+    assert Bare.__schema_title__ == 'Bare'
+    assert Bare.__schema_description__ == 'Extensible enum for Bare'
+
+
+def test_enum_schema_class_attributes_on_a_hand_written_enum() -> None:
+    """An enum spelled out with the mixin takes its schema title and description from class attributes."""
+
+    class Kinds(ModelableEnumMixin, str, aenum.Enum):  # type: ignore[misc]
+        __schema_title__ = 'Shape kinds'
+        __schema_description__ = 'Kind of a shape'
+
+    assert Kinds.__schema_title__ == 'Shape kinds'
+    assert Kinds.__schema_description__ == 'Kind of a shape'

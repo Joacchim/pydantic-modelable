@@ -9,6 +9,11 @@
    `SchemaError`. Until the first value exists the field rejects every input,
    and a model rebuilt while the first extension registers still accepts its
    value.
+ - The `schema_title` / `schema_description` subclass parameters of
+   `ModelableStrEnum` now reach the JSON schema. `aenum` does not forward class
+   keywords to `__init_subclass__`, so they were silently ignored. An enum
+   spelled out as `(ModelableEnumMixin, str, aenum.Enum)` can set
+   `__schema_title__` / `__schema_description__` as class attributes instead.
 
 ### Improvements:
 
