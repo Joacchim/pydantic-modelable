@@ -2,6 +2,14 @@
 
 ## In development:
 
+### Fixes:
+
+ - A model holding a `ModelableStrEnum` field can be declared before any
+   extension is loaded. It used to fail at class creation with a pydantic
+   `SchemaError`. Until the first value exists the field rejects every input,
+   and a model rebuilt while the first extension registers still accepts its
+   value.
+
 ### Improvements:
 
  - The registration decorators (`as_attribute`, `extends_union`,

@@ -8,7 +8,7 @@ from pydantic import (
     GetJsonSchemaHandler,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema, core_schema
+from pydantic_core import CoreSchema, PydanticCustomError, core_schema
 
 
 class ModelableEnumMixin:
@@ -66,15 +66,22 @@ class ModelableEnumMixin:
     @classmethod
     def __get_pydantic_core_schema__(cls, source: type[Any], handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
         """Redefine the pydantic core schema using the dynamically injected Enum values."""
-        return core_schema.enum_schema(
-            cls,
-            # We need to provide at least one "choice" for an enum schema.
-            # Additionally, mypy complains on the Type having no "__iter__"
-            # attribute but it works nonetheless
-            (['none'] if not cls.__setup__ else list(cls._member_map_.values())),  # type: ignore
-            sub_type='str',
-            strict=True,
-        )
+        # NOTE: mypy complains on the Type having no "__iter__" attribute but it works nonetheless
+        members = list(cls)  # type: ignore[call-overload]
+        if not members:
+            # An enum schema needs at least one member. Without any yet, look
+            # the value up at validation time: a model rebuilt while the first
+            # extension registers is rebuilt before the enum receives its value.
+            def _lookup(value: Any) -> Any:
+                try:
+                    return cls(value)  # type: ignore[call-arg]
+                except ValueError:
+                    raise PydanticCustomError(
+                        'enum', 'Input is not a value of {enum}', {'enum': cls.__name__}
+                    ) from None
+
+            return core_schema.no_info_after_validator_function(_lookup, core_schema.str_schema())
+        return core_schema.enum_schema(cls, members, sub_type='str', strict=True)
 
     @classmethod
     def __get_pydantic_json_schema__(
