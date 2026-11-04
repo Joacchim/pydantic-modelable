@@ -8,7 +8,7 @@ from pydantic import (
     GetJsonSchemaHandler,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema, core_schema
+from pydantic_core import CoreSchema, PydanticCustomError, core_schema
 
 
 class ModelableEnumMixin:
@@ -31,6 +31,15 @@ class ModelableEnumMixin:
     ):
         ...
     ```
+
+    An enum spelled out as `(ModelableEnumMixin, str, aenum.Enum)` does not get
+    these keywords: `aenum` does not forward them to `__init_subclass__`. Set
+    them as class attributes instead:
+    ```py
+    class MyExtensibleEnum(ModelableEnumMixin, str, aenum.Enum):
+        __schema_title__ = 'MyExtensibleEnum'
+        __schema_description__ = 'This is my Enum'
+    ```
     """
 
     __schema_title__: ClassVar[str] = ''
@@ -46,10 +55,15 @@ class ModelableEnumMixin:
 
          - `schema_title`: The title of the model's generated schema
          - `schema_description`: The description of the model's generated schema
+
+        Without a keyword, the class attribute of the same name set in the
+        class body is kept, else a default derived from the class name.
         """
         super().__init_subclass__(**kwargs)
-        cls.__schema_title__ = schema_title if schema_title else f'{cls.__name__}'
-        cls.__schema_description__ = schema_description if schema_description else f'Extensible enum for {cls.__name__}'
+        cls.__schema_title__ = schema_title or cls.__dict__.get('__schema_title__') or cls.__name__
+        cls.__schema_description__ = (
+            schema_description or cls.__dict__.get('__schema_description__') or f'Extensible enum for {cls.__name__}'
+        )
 
     @classmethod
     def _add_choice(cls, choice: str) -> None:
@@ -66,15 +80,22 @@ class ModelableEnumMixin:
     @classmethod
     def __get_pydantic_core_schema__(cls, source: type[Any], handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
         """Redefine the pydantic core schema using the dynamically injected Enum values."""
-        return core_schema.enum_schema(
-            cls,
-            # We need to provide at least one "choice" for an enum schema.
-            # Additionally, mypy complains on the Type having no "__iter__"
-            # attribute but it works nonetheless
-            (['none'] if not cls.__setup__ else list(cls._member_map_.values())),  # type: ignore
-            sub_type='str',
-            strict=True,
-        )
+        # NOTE: mypy complains on the Type having no "__iter__" attribute but it works nonetheless
+        members = list(cls)  # type: ignore[call-overload]
+        if not members:
+            # An enum schema needs at least one member. Without any yet, look
+            # the value up at validation time: a model rebuilt while the first
+            # extension registers is rebuilt before the enum receives its value.
+            def _lookup(value: Any) -> Any:
+                try:
+                    return cls(value)  # type: ignore[call-arg]
+                except ValueError:
+                    raise PydanticCustomError(
+                        'enum', 'Input is not a value of {enum}', {'enum': cls.__name__}
+                    ) from None
+
+            return core_schema.no_info_after_validator_function(_lookup, core_schema.str_schema())
+        return core_schema.enum_schema(cls, members, sub_type='str', strict=True)
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -102,21 +123,49 @@ if TYPE_CHECKING:
     import enum
 
     _StrEnumImpl = enum.Enum
+    _StrEnumMeta = enum.EnumMeta
 else:
     _StrEnumImpl = aenum.Enum
+    _StrEnumMeta = type(aenum.Enum)
 
 
-class ModelableStrEnum(ModelableEnumMixin, str, _StrEnumImpl):
+class _ModelableEnumMeta(_StrEnumMeta):
+    """Apply the `schema_title` / `schema_description` subclass parameters.
+
+    `aenum` creates the class without forwarding the class keywords, so
+    `ModelableEnumMixin.__init_subclass__` never receives them.
+    """
+
+    def __new__(
+        metacls,
+        cls: str,
+        bases: tuple[type, ...],
+        classdict: Any,
+        schema_title: str = '',
+        schema_description: str = '',
+        **kwds: Any,
+    ) -> '_ModelableEnumMeta':
+        enum_class = super().__new__(metacls, cls, bases, classdict, **kwds)
+        mixin = cast(type[ModelableEnumMixin], enum_class)
+        if schema_title:
+            mixin.__schema_title__ = schema_title
+        if schema_description:
+            mixin.__schema_description__ = schema_description
+        return enum_class
+
+
+class ModelableStrEnum(ModelableEnumMixin, str, _StrEnumImpl, metaclass=_ModelableEnumMeta):
     """Base class for extensible string enums.
 
     Inherit from this rather than spelling out
-    `(ModelableEnumMixin, str, aenum.Enum)`. At runtime it is exactly that — an
-    empty `aenum` string enum, extended in place by
+    `(ModelableEnumMixin, str, aenum.Enum)`. At runtime it is that same empty
+    `aenum` string enum, extended in place by
     `pydantic_modelable.Modelable.extends_enum` — but type checkers see a
     standard `enum.Enum`, so subclasses are understood as enums without an
     `aenum`-induced `# type: ignore`.
 
-    The `schema_title` / `schema_description` subclass keyword arguments provided
-    by `ModelableEnumMixin` are accepted as usual.
+    It also accepts the `schema_title` / `schema_description` subclass keyword
+    arguments, applied by its metaclass since `aenum` does not forward them to
+    `ModelableEnumMixin.__init_subclass__`.
     """
 
