@@ -65,9 +65,15 @@ It covers:
 
 - The plugin is **mypy-specific**. Other checkers (e.g. pyright) benefit only
   from the "any type-checker" layer above.
-- `extends_enum` **member-name access** (`Species.dog`) resolves on full runs
-  but not on incremental / daemon runs (e.g. an editor using the mypy daemon),
-  where cached modules are not re-analysed and a clean run is needed. This is
-  inherent: enum member access on an unknown name exposes no plugin hook to
-  recover it lazily. Enum iteration, membership and construction, and all of
-  `as_attribute` / `extends_union`, work in every mode.
+- Members an extension **creates** on another model — `as_attribute` fields and
+  `extends_enum` enum values (`Species.dog`) — resolve on full runs but not on
+  incremental / daemon runs (e.g. an editor using the mypy daemon), where the
+  extension modules are served from cache and a clean run is needed. This is
+  inherent: such a member must physically *exist* on the target for mypy to
+  resolve it (pydantic models expose no `__getattr__` to type-checkers, by
+  design, so there is no hook to resolve it lazily), and the cross-module
+  injection that adds it is not replayed from the cache.
+- `extends_union` is **not** affected: it retypes a field the model already
+  declares, which mypy always sees, so it works in every mode — as does
+  `ModelableStrEnum`'s enum behaviour (iteration, membership, construction,
+  `.value`).

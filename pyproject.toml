@@ -53,6 +53,10 @@ test = [
 doc = [
     "mkdocs",
     "mkdocstrings[python]",
+    # mkdocstrings dropped Python 3.10 at 1.0.7. Its last 3.10-compatible release
+    # instantiates pymdown-extensions' Highlight without the `md` argument that
+    # became required in pymdown-extensions 12.2.
+    "pymdown-extensions<12.2; python_version < '3.11'",
 ]
 
 [project.urls]
